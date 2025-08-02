@@ -1,0 +1,176 @@
+{
+  "timestamp": "2025-08-01 03:05 PM CST",
+  "total_alerts": 20,
+  "alert_types": {
+    "oversold": 7,
+    "losing_trade": 7,
+    "overbought": 2,
+    "no_stop_loss": 2,
+    "high_profit": 2
+  },
+  "alerts": [
+    {
+      "type": "oversold",
+      "symbol": "APE-USDT",
+      "platform": "BingX",
+      "rsi": 20.3,
+      "pnl": -16.48,
+      "message": "\ud83d\udfe9 $APE-USDT is oversold at RSI 20.3. Clean reversal setup detected."
+    },
+    {
+      "type": "losing_trade",
+      "symbol": "APE-USDT",
+      "platform": "BingX",
+      "pnl": -16.48,
+      "margin": 10.43,
+      "message": "\ud83d\udea8 $APE-USDT is down -16.5%. Capital preservation - review position."
+    },
+    {
+      "type": "overbought",
+      "symbol": "XRP-USDT",
+      "platform": "BingX",
+      "rsi": 85,
+      "pnl": 909.92,
+      "message": "\ud83d\udfe5 Alert! $XRP-USDT RSI is 85.0. Consider exiting or trailing stop."
+    },
+    {
+      "type": "no_stop_loss",
+      "symbol": "XRP-USDT",
+      "platform": "BingX",
+      "margin": 257.17,
+      "message": "\ud83d\udee1\ufe0f $XRP-USDT position ($257) needs STOP LOSS for fast rotation!"
+    },
+    {
+      "type": "high_profit",
+      "symbol": "XRP-USDT",
+      "platform": "BingX",
+      "pnl": 909.92,
+      "message": "\ud83d\udcb0 $XRP-USDT up 909.9%! Consider rotating or trailing stops."
+    },
+    {
+      "type": "overbought",
+      "symbol": "ETH-USDT",
+      "platform": "BingX",
+      "rsi": 85,
+      "pnl": 57.12,
+      "message": "\ud83d\udfe5 Alert! $ETH-USDT RSI is 85.0. Consider exiting or trailing stop."
+    },
+    {
+      "type": "no_stop_loss",
+      "symbol": "ETH-USDT",
+      "platform": "BingX",
+      "margin": 536.86,
+      "message": "\ud83d\udee1\ufe0f $ETH-USDT position ($537) needs STOP LOSS for fast rotation!"
+    },
+    {
+      "type": "high_profit",
+      "symbol": "ETH-USDT",
+      "platform": "BingX",
+      "pnl": 57.12,
+      "message": "\ud83d\udcb0 $ETH-USDT up 57.1%! Consider rotating or trailing stops."
+    },
+    {
+      "type": "oversold",
+      "symbol": "AVAX/USD",
+      "platform": "Kraken",
+      "rsi": 15,
+      "pnl": -544506.92,
+      "message": "\ud83d\udfe9 $AVAX/USD is oversold at RSI 15.0. Clean reversal setup detected."
+    },
+    {
+      "type": "losing_trade",
+      "symbol": "AVAX/USD",
+      "platform": "Kraken",
+      "pnl": -544506.92,
+      "margin": 1.0,
+      "message": "\ud83d\udea8 $AVAX/USD is down -544506.9%. Capital preservation - review position."
+    },
+    {
+      "type": "oversold",
+      "symbol": "BERA/USD",
+      "platform": "Kraken",
+      "rsi": 15,
+      "pnl": -119133.99,
+      "message": "\ud83d\udfe9 $BERA/USD is oversold at RSI 15.0. Clean reversal setup detected."
+    },
+    {
+      "type": "losing_trade",
+      "symbol": "BERA/USD",
+      "platform": "Kraken",
+      "pnl": -119133.99,
+      "margin": 1.0,
+      "message": "\ud83d\udea8 $BERA/USD is down -119134.0%. Capital preservation - review position."
+    },
+    {
+      "type": "oversold",
+      "symbol": "FORTH/USD",
+      "platform": "Kraken",
+      "rsi": 15,
+      "pnl": -266690.09,
+      "message": "\ud83d\udfe9 $FORTH/USD is oversold at RSI 15.0. Clean reversal setup detected."
+    },
+    {
+      "type": "losing_trade",
+      "symbol": "FORTH/USD",
+      "platform": "Kraken",
+      "pnl": -266690.09,
+      "margin": 1.0,
+      "message": "\ud83d\udea8 $FORTH/USD is down -266690.1%. Capital preservation - review position."
+    },
+    {
+      "type": "oversold",
+      "symbol": "JUP/USD",
+      "platform": "Kraken",
+      "rsi": 15,
+      "pnl": -46597.35,
+      "message": "\ud83d\udfe9 $JUP/USD is oversold at RSI 15.0. Clean reversal setup detected."
+    },
+    {
+      "type": "losing_trade",
+      "symbol": "JUP/USD",
+      "platform": "Kraken",
+      "pnl": -46597.35,
+      "margin": 1.0,
+      "message": "\ud83d\udea8 $JUP/USD is down -46597.3%. Capital preservation - review position."
+    },
+    {
+      "type": "oversold",
+      "symbol": "STX/USD",
+      "platform": "Kraken",
+      "rsi": 15,
+      "pnl": -261502.49,
+      "message": "\ud83d\udfe9 $STX/USD is oversold at RSI 15.0. Clean reversal setup detected."
+    },
+    {
+      "type": "losing_trade",
+      "symbol": "STX/USD",
+      "platform": "Kraken",
+      "pnl": -261502.49,
+      "margin": 1.0,
+      "message": "\ud83d\udea8 $STX/USD is down -261502.5%. Capital preservation - review position."
+    },
+    {
+      "type": "oversold",
+      "symbol": "SUPER/USD",
+      "platform": "Kraken",
+      "rsi": 15,
+      "pnl": -15227.58,
+      "message": "\ud83d\udfe9 $SUPER/USD is oversold at RSI 15.0. Clean reversal setup detected."
+    },
+    {
+      "type": "losing_trade",
+      "symbol": "SUPER/USD",
+      "platform": "Kraken",
+      "pnl": -15227.58,
+      "margin": 1.0,
+      "message": "\ud83d\udea8 $SUPER/USD is down -15227.6%. Capital preservation - review position."
+    }
+  ],
+  "summary_parts": [
+    "\u26a0\ufe0f Overbought: 2",
+    "\ud83d\udcc9 Oversold: 7",
+    "\u2757Losing: 7",
+    "\ud83d\udea8 No SL: 2",
+    "\ud83d\udcb0 High Profit: 2"
+  ]
+}
