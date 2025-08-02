@@ -1,981 +1,424 @@
-#!/usr/bin/env python3
-"""
-Main Production Server - Railway Deployment Optimized
-Complete API with ALL endpoints for BingX, Blofin, Kraken, and CryptoNews
-"""
-
-import threading
-import time
-import schedule
-from datetime import datetime
-import pytz
-import os
-import sys
-import signal
-import json
-import glob
 from flask import Flask, jsonify, request
-from flask_cors import CORS
+import logging
+import os
+from datetime import datetime
+import traceback
 
-# Create Flask app
+# Import our custom modules with error handling
+from logger_config import setup_logging
+from error_handler import handle_exchange_error, ExchangeNotAvailableError
+from exchange_manager import ExchangeManager
+from trading_functions import TradingFunctions
+
+# Setup logging
+setup_logging()
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
-CORS(app, origins="*")
 
-# Discord Configuration
-ALPHA_CHANNEL_ID = os.getenv('ALPHA_DISCORD_CHANNEL_ID', '1399790636990857277')
-PORTFOLIO_CHANNEL_ID = os.getenv('PORTFOLIO_DISCORD_CHANNEL_ID', '1399451217372905584')
+# Initialize exchange manager and trading functions
+exchange_manager = ExchangeManager()
+trading_functions = TradingFunctions(exchange_manager)
 
-try:
-    from automated_trading_alerts import run_automated_alerts
-    print("✅ Successfully imported automated_trading_alerts")
-except ImportError as e:
-    print(f"⚠️ Warning: automated_trading_alerts import failed: {e}")
-    def run_automated_alerts():
-        print("📊 Running fallback alert system...")
-        return True
-
-class MainServer:
-    def __init__(self):
-        self.last_alert = None
-        self.server_status = "starting"
-        self.alert_thread = None
-        self.is_running = True
-        self.error_count = 0
-        self.last_health_check = datetime.now(pytz.timezone('US/Central'))
-        
-    def run_scheduled_alerts(self):
-        """Run trading alerts with enhanced error recovery"""
-        try:
-            current_time = datetime.now(pytz.timezone('US/Central'))
-            print(f"\n🔄 Running scheduled alerts - {current_time.strftime('%I:%M %p CST')}")
-            
-            # Run alerts
-            run_automated_alerts()
-            self.last_alert = current_time
-            self.error_count = 0
-            print("✅ Alerts completed successfully")
-            
-        except Exception as e:
-            self.error_count += 1
-            print(f"❌ Alert error #{self.error_count}: {e}")
-            
-            # If too many errors, wait longer before next attempt
-            if self.error_count > 3:
-                print("⚠️ Multiple alert failures - extending wait time")
-                time.sleep(300)  # Wait 5 minutes before next attempt
-    
-    def alert_scheduler(self):
-        """Background alert scheduler with enhanced error recovery"""
-        print("🚀 Alert scheduler starting...")
-        
-        # Schedule alerts every hour
-        schedule.every().hour.do(self.run_scheduled_alerts)
-        
-        # Run initial alert after 1 minute
-        print("🎯 Scheduling initial alert in 1 minute...")
-        time.sleep(60)
-        self.run_scheduled_alerts()
-        
-        # Keep scheduler running with error recovery
-        while self.is_running:
-            try:
-                schedule.run_pending()
-                time.sleep(30)  # Check every 30 seconds
-                
-                # Update health check timestamp
-                self.last_health_check = datetime.now(pytz.timezone('US/Central'))
-                
-            except Exception as e:
-                print(f"⚠️ Scheduler error: {e}")
-                time.sleep(60)  # Wait longer on error
-                
-                # Try to recover from errors
-                try:
-                    schedule.clear()
-                    schedule.every().hour.do(self.run_scheduled_alerts)
-                    print("🔄 Scheduler recovered and reinitialized")
-                except:
-                    print("❌ Failed to recover scheduler")
-    
-    def start_scheduler(self):
-        """Start the alert scheduler in background thread"""
-        self.alert_thread = threading.Thread(target=self.alert_scheduler, daemon=False)
-        self.alert_thread.start()
-        print("✅ Alert scheduler thread started")
-
-# Initialize server
-server = MainServer()
-
-# Helper function for error handling
-def safe_api_call(func, *args, **kwargs):
-    """Safely execute API calls with error handling"""
-    try:
-        return func(*args, **kwargs)
-    except Exception as e:
-        print(f"❌ API call failed: {e}")
-        return {'error': str(e), 'status': 'api_error'}
-
-# Global CORS handler
-@app.before_request
-def handle_options():
-    if request.method == 'OPTIONS':
-        response = jsonify({'status': 'ok'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,User-Agent,Accept')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
-        return response
-
-@app.after_request
-def after_request(response):
-    response.headers.add('Access-Control-Allow-Origin', '*')
-    response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization,User-Agent,Accept')
-    response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS,PUT,DELETE')
-    return response
-
-# ============================================================================
-# MAIN ENDPOINTS
-# ============================================================================
-
-@app.route('/')
-def root_index():
-    """API Documentation and Status"""
-    port = int(os.getenv('PORT', 5000))
-    is_railway = os.getenv('RAILWAY_ENVIRONMENT') is not None
-    
+@app.route('/', methods=['GET'])
+def root():
+    """Root endpoint with API information"""
     return jsonify({
-        'status': 'operational',
-        'message': 'Complete Crypto Trading API - ALL ENDPOINTS ACTIVE',
-        'deployment_mode': 'Railway Production' if is_railway else 'Local Development',
-        'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-        'total_endpoints': 29,
-        'categories': {
-            'health': ['health'],
-            'live_data': ['all-exchanges', 'account-balances', 'bingx-positions', 'blofin-positions', 'market-data'],
-            'bingx_analysis': ['klines', 'market-analysis', 'candlestick-analysis', 'multi-timeframe'],
-            'chatgpt': ['account-summary', 'portfolio-analysis'],
-            'crypto_news': ['portfolio', 'symbols', 'risk-alerts', 'bullish-signals', 'breaking-news', 'opportunity-scanner', 'market-intelligence', 'pump-dump-detector'],
-            'kraken': ['positions', 'balance', 'trade-history', 'orders', 'market-data', 'portfolio-performance', 'asset-allocation', 'trading-stats']
-        },
-        'platform_info': {
-            'railway_deployment': is_railway,
-            'discord_configured': bool(ALPHA_CHANNEL_ID and PORTFOLIO_CHANNEL_ID),
-            'api_integrations': ['BingX', 'Blofin', 'Kraken', 'CryptoNews']
+        'message': 'Crypto Trading API Server',
+        'version': '1.0.0',
+        'status': 'running',
+        'available_endpoints': 29,
+        'available_exchanges': exchange_manager.get_available_exchanges(),
+        'total_exchanges': len(exchange_manager.get_available_exchanges()),
+        'endpoints': {
+            'health': '/health',
+            'exchange_status': '/exchanges/status',
+            'market_data': '/api/ticker/{exchange}/{symbol}, /api/orderbook/{exchange}/{symbol}, /api/trades/{exchange}/{symbol}',
+            'trading': '/api/order (POST), /api/orders/{exchange}, /api/order/{exchange}/{order_id} (DELETE)',
+            'account': '/api/balance/{exchange}, /api/account-info/{exchange}, /api/transfer (POST)',
+            'portfolio': '/api/portfolio/{exchange}, /api/positions/{exchange}',
+            'history': '/api/order-history/{exchange}, /api/trade-history/{exchange}, /api/deposit-history/{exchange}',
+            'derivatives': '/api/funding-rate/{exchange}/{symbol}, /api/leverage/{exchange}/{symbol} (POST)',
+            'documentation': 'Visit /health for health check and /exchanges/status for exchange status'
         }
     })
 
-@app.route('/health', methods=['GET', 'OPTIONS'])
+@app.route('/health', methods=['GET'])
 def health_check():
-    """External health check endpoint"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-        
-    current_time = datetime.now(pytz.timezone('US/Central'))
-    scheduler_healthy = (current_time - server.last_health_check).seconds < 120
-    
+    """Health check endpoint"""
     return jsonify({
-        'status': 'healthy' if scheduler_healthy else 'degraded',
-        'timestamp': current_time.isoformat(),
-        'uptime_check': 'ok',
-        'server_running': server.is_running,
-        'scheduler_healthy': scheduler_healthy,
-        'last_scheduler_check': server.last_health_check.isoformat(),
-        'error_count': server.error_count,
-        'platform': 'Railway Production',
-        'discord_configured': bool(ALPHA_CHANNEL_ID and PORTFOLIO_CHANNEL_ID),
-        'total_endpoints': 29
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'available_exchanges': exchange_manager.get_available_exchanges()
     })
 
-# ============================================================================
-# LIVE DATA ENDPOINTS
-# ============================================================================
+@app.route('/exchanges/status', methods=['GET'])
+def exchanges_status():
+    """Get status of all exchanges"""
+    return jsonify(exchange_manager.get_exchange_status())
 
-@app.route('/api/live/all-exchanges', methods=['GET', 'OPTIONS'])
-def get_all_exchanges_data():
-    """Get data from all exchanges combined"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/ticker/<exchange>/<symbol>', methods=['GET'])
+def get_ticker(exchange, symbol):
+    """Get ticker for a specific symbol on an exchange"""
     try:
-        from main import (fetch_positions, initialize_blofin, fetch_blofin_positions, 
-                         initialize_kraken, fetch_kraken_positions)
-        
-        # Get BingX data
-        bingx_data = safe_api_call(fetch_positions)
-        
-        # Get Blofin data
-        blofin_exchange = initialize_blofin()
-        blofin_data = safe_api_call(fetch_blofin_positions, blofin_exchange)
-        
-        # Get Kraken data
-        kraken_exchange = initialize_kraken()
-        kraken_data = safe_api_call(fetch_kraken_positions, kraken_exchange)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'source': 'All Exchanges Live Data',
-            'exchanges': {
-                'bingx': bingx_data,
-                'blofin': blofin_data,
-                'kraken': kraken_data
-            },
-            'status': 'success'
-        })
+        result = trading_functions.get_ticker(exchange, symbol)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting ticker for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/live/account-balances', methods=['GET', 'OPTIONS'])
-def get_account_balances():
-    """Get account balances from all exchanges"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/orderbook/<exchange>/<symbol>', methods=['GET'])
+def get_orderbook(exchange, symbol):
+    """Get orderbook for a specific symbol on an exchange"""
     try:
-        from main import initialize_blofin, initialize_kraken
-        import ccxt
-        
-        balances = {}
-        
-        # BingX balance (if available)
-        try:
-            # BingX balance would need separate API call
-            balances['bingx'] = {'status': 'positions_only', 'note': 'Use positions endpoint for BingX data'}
-        except Exception as e:
-            balances['bingx'] = {'error': str(e)}
-        
-        # Blofin balance
-        try:
-            blofin = initialize_blofin()
-            if blofin:
-                blofin_balance = blofin.fetch_balance()
-                balances['blofin'] = blofin_balance
-        except Exception as e:
-            balances['blofin'] = {'error': str(e)}
-        
-        # Kraken balance
-        try:
-            kraken = initialize_kraken()
-            if kraken:
-                kraken_balance = kraken.fetch_balance()
-                balances['kraken'] = kraken_balance
-        except Exception as e:
-            balances['kraken'] = {'error': str(e)}
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'source': 'All Exchange Balances',
-            'balances': balances,
-            'status': 'success'
-        })
+        limit = request.args.get('limit', 20, type=int)
+        result = trading_functions.get_orderbook(exchange, symbol, limit)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting orderbook for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/live/bingx-positions', methods=['GET', 'OPTIONS'])
-def get_live_bingx_positions():
-    """Get live positions directly from BingX API"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/trades/<exchange>/<symbol>', methods=['GET'])
+def get_trades(exchange, symbol):
+    """Get recent trades for a specific symbol on an exchange"""
     try:
-        from main import fetch_positions, fetch_open_orders
-        
-        positions_result = fetch_positions()
-        orders_result = fetch_open_orders()
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'source': 'BingX Live API',
-            'positions': positions_result,
-            'orders': orders_result,
-            'status': 'success'
-        })
+        limit = request.args.get('limit', 50, type=int)
+        result = trading_functions.get_trades(exchange, symbol, limit)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting trades for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/live/blofin-positions', methods=['GET', 'OPTIONS'])
-def get_blofin_positions():
-    """Get live positions from Blofin"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/balance/<exchange>', methods=['GET'])
+def get_balance(exchange):
+    """Get account balance for an exchange"""
     try:
-        from main import initialize_blofin, fetch_blofin_positions, fetch_blofin_orders
-        
-        blofin_exchange = initialize_blofin()
-        positions = fetch_blofin_positions(blofin_exchange)
-        orders = fetch_blofin_orders(blofin_exchange)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'source': 'Blofin Live API',
-            'positions': positions,
-            'orders': orders,
-            'status': 'success'
-        })
+        result = trading_functions.get_balance(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting balance for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/live/market-data/<symbol>', methods=['GET', 'OPTIONS'])
-def get_market_data(symbol):
-    """Get market data for a specific symbol"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/markets/<exchange>', methods=['GET'])
+def get_markets(exchange):
+    """Get available markets for an exchange"""
     try:
-        from main import get_bingx_market_data
-        
-        market_data = get_bingx_market_data(symbol)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'symbol': symbol,
-            'market_data': market_data,
-            'status': 'success'
-        })
+        result = trading_functions.get_markets(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting markets for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-# ============================================================================
-# BINGX ANALYSIS ENDPOINTS
-# ============================================================================
-
-@app.route('/api/bingx/klines/<symbol>', methods=['GET', 'OPTIONS'])
-def get_bingx_klines(symbol):
-    """Get BingX candlestick data"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/ohlcv/<exchange>/<symbol>', methods=['GET'])
+def get_ohlcv(exchange, symbol):
+    """Get OHLCV data for a specific symbol"""
     try:
-        from main import fetch_bingx_klines
-        
-        interval = request.args.get('interval', '1h')
-        limit = int(request.args.get('limit', 100))
-        
-        klines_data = fetch_bingx_klines(symbol, interval, limit)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'symbol': symbol,
-            'interval': interval,
-            'limit': limit,
-            'klines': klines_data,
-            'status': 'success'
-        })
+        timeframe = request.args.get('timeframe', '1h')
+        limit = request.args.get('limit', 100, type=int)
+        result = trading_functions.get_ohlcv(exchange, symbol, timeframe, limit)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting OHLCV for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/bingx/market-analysis/<symbol>', methods=['GET', 'OPTIONS'])
-def get_bingx_market_analysis(symbol):
-    """Get comprehensive BingX market analysis"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/order', methods=['POST'])
+def create_order():
+    """Create a new order"""
     try:
-        from main import get_bingx_market_data
+        data = request.get_json()
+        exchange = data.get('exchange')
+        symbol = data.get('symbol')
+        order_type = data.get('type')
+        side = data.get('side')
+        amount = data.get('amount')
+        price = data.get('price')
         
-        analysis = get_bingx_market_data(symbol)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'symbol': symbol,
-            'analysis': analysis,
-            'status': 'success'
-        })
+        result = trading_functions.create_order(exchange, symbol, order_type, side, amount, price)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error creating order: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/bingx/candlestick-analysis/<symbol>', methods=['GET', 'OPTIONS'])
-def get_bingx_candlestick_analysis(symbol):
-    """Get BingX candlestick pattern analysis"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/orders/<exchange>', methods=['GET'])
+def get_orders(exchange):
+    """Get open orders for an exchange"""
     try:
-        from main import analyze_candlestick_patterns
-        
-        interval = request.args.get('interval', '1h')
-        limit = int(request.args.get('limit', 50))
-        
-        analysis = analyze_candlestick_patterns(symbol, interval, limit)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'symbol': symbol,
-            'analysis': analysis,
-            'status': 'success'
-        })
+        symbol = request.args.get('symbol')
+        result = trading_functions.get_orders(exchange, symbol)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting orders for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/bingx/multi-timeframe/<symbol>', methods=['GET', 'OPTIONS'])
-def get_bingx_multi_timeframe(symbol):
-    """Get multi-timeframe analysis for BingX symbol"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/order/<exchange>/<order_id>', methods=['DELETE'])
+def cancel_order(exchange, order_id):
+    """Cancel an order"""
     try:
-        from main import analyze_candlestick_patterns
-        
-        timeframes = ['15m', '1h', '4h', '1d']
-        analysis = {}
-        
-        for tf in timeframes:
-            analysis[tf] = analyze_candlestick_patterns(symbol, tf, 20)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'symbol': symbol,
-            'timeframes': analysis,
-            'status': 'success'
-        })
+        symbol = request.args.get('symbol')
+        result = trading_functions.cancel_order(exchange, order_id, symbol)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error canceling order {order_id} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-# ============================================================================
-# CHATGPT OPTIMIZED ENDPOINTS
-# ============================================================================
-
-@app.route('/api/chatgpt/account-summary', methods=['GET', 'OPTIONS'])
-def get_chatgpt_account_summary():
-    """ChatGPT-optimized account summary"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/positions/<exchange>', methods=['GET'])
+def get_positions(exchange):
+    """Get positions for an exchange"""
     try:
-        from main import export_positions
-        
-        # Run export to get latest data
-        export_positions()
-        
-        # Load the latest positions file
-        json_files = glob.glob("positions_*.json")
-        if json_files:
-            latest_file = max(json_files, key=lambda x: os.path.getctime(x))
-            with open(latest_file, 'r') as f:
-                positions = json.load(f)
-        else:
-            positions = []
-        
-        # Calculate summary
-        total_positions = len(positions)
-        profitable = len([p for p in positions if p.get('PnL %', 0) > 0])
-        losing = len([p for p in positions if p.get('PnL %', 0) < 0])
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).strftime('%Y-%m-%d %I:%M %p CST'),
-            'platform': 'Railway',
-            'account_summary': {
-                'total_positions': total_positions,
-                'profitable_positions': profitable,
-                'losing_positions': losing,
-                'neutral_positions': total_positions - profitable - losing,
-                'success_rate': round((profitable / total_positions * 100), 2) if total_positions > 0 else 0
-            },
-            'status': 'success'
-        })
+        result = trading_functions.get_positions(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting positions for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/chatgpt/portfolio-analysis', methods=['GET', 'OPTIONS'])
-def get_chatgpt_portfolio_analysis():
-    """ChatGPT-optimized portfolio analysis"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/funding-rate/<exchange>/<symbol>', methods=['GET'])
+def get_funding_rate(exchange, symbol):
+    """Get funding rate for a symbol"""
     try:
-        # Load latest positions
-        json_files = glob.glob("positions_*.json")
-        if json_files:
-            latest_file = max(json_files, key=lambda x: os.path.getctime(x))
-            with open(latest_file, 'r') as f:
-                positions = json.load(f)
-        else:
-            positions = []
-        
-        profitable = [p for p in positions if p.get('PnL %', 0) > 0]
-        losing = [p for p in positions if p.get('PnL %', 0) < 0]
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).strftime('%Y-%m-%d %I:%M %p CST'),
-            'platform': 'Railway',
-            'portfolio_overview': {
-                'total_positions': len(positions),
-                'profitable_count': len(profitable),
-                'losing_count': len(losing),
-                'top_performers': profitable[:3] if profitable else [],
-                'worst_performers': losing[:3] if losing else []
-            },
-            'status': 'success'
-        })
+        result = trading_functions.get_funding_rate(exchange, symbol)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting funding rate for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-# ============================================================================
-# CRYPTO NEWS ENDPOINTS
-# ============================================================================
-
-@app.route('/api/crypto-news/portfolio', methods=['GET', 'OPTIONS'])
-def get_portfolio_crypto_news():
-    """Get crypto news for portfolio symbols"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/leverage/<exchange>/<symbol>', methods=['POST'])
+def set_leverage(exchange, symbol):
+    """Set leverage for a symbol"""
     try:
-        from crypto_news_alerts import get_portfolio_symbols, alert_narrative_confluence, get_general_crypto_news
-        
-        symbols = get_portfolio_symbols()
-        news = get_general_crypto_news(items=50)
-        alerts = alert_narrative_confluence(symbols, news)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'portfolio_symbols': symbols,
-            'news_alerts': alerts,
-            'status': 'success'
-        })
+        data = request.get_json()
+        leverage = data.get('leverage')
+        result = trading_functions.set_leverage(exchange, symbol, leverage)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error setting leverage for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/crypto-news/symbols/<symbols>', methods=['GET', 'OPTIONS'])
-def get_crypto_news_by_symbols(symbols):
-    """Get crypto news for specific symbols"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/margin-mode/<exchange>/<symbol>', methods=['POST'])
+def set_margin_mode(exchange, symbol):
+    """Set margin mode for a symbol"""
     try:
-        from crypto_news_alerts import get_news_by_tickers
-        
-        symbol_list = symbols.split(',')
-        news = get_news_by_tickers(symbol_list, items=30)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'symbols': symbol_list,
-            'news': news,
-            'status': 'success'
-        })
+        data = request.get_json()
+        margin_mode = data.get('margin_mode')
+        result = trading_functions.set_margin_mode(exchange, symbol, margin_mode)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error setting margin mode for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/crypto-news/risk-alerts', methods=['GET', 'OPTIONS'])
-def get_crypto_risk_alerts():
-    """Get crypto risk alerts and bearish flags"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/deposit-history/<exchange>', methods=['GET'])
+def get_deposit_history(exchange):
+    """Get deposit history for an exchange"""
     try:
-        from crypto_news_alerts import get_general_crypto_news, filter_bearish_flags
-        
-        news = get_general_crypto_news(items=100)
-        risk_alerts = filter_bearish_flags(news)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'risk_alerts': risk_alerts,
-            'total_alerts': len(risk_alerts),
-            'status': 'success'
-        })
+        result = trading_functions.get_deposit_history(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting deposit history for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/crypto-news/bullish-signals', methods=['GET', 'OPTIONS'])
-def get_crypto_bullish_signals():
-    """Get bullish crypto signals and catalysts"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/withdrawal-history/<exchange>', methods=['GET'])
+def get_withdrawal_history(exchange):
+    """Get withdrawal history for an exchange"""
     try:
-        from crypto_news_alerts import get_general_crypto_news, filter_bullish_signals
-        
-        news = get_general_crypto_news(items=100)
-        bullish_signals = filter_bullish_signals(news)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'bullish_signals': bullish_signals,
-            'total_signals': len(bullish_signals),
-            'status': 'success'
-        })
+        result = trading_functions.get_withdrawal_history(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting withdrawal history for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/crypto-news/breaking-news', methods=['GET', 'OPTIONS'])
-def get_breaking_crypto_news():
-    """Get breaking crypto news"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/trading-fees/<exchange>', methods=['GET'])
+def get_trading_fees(exchange):
+    """Get trading fees for an exchange"""
     try:
-        from crypto_news_alerts import get_breaking_news_optimized
-        
-        hours = int(request.args.get('hours', 6))
-        breaking_news = get_breaking_news_optimized(hours=hours, items=50)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'timeframe_hours': hours,
-            'breaking_news': breaking_news,
-            'status': 'success'
-        })
+        result = trading_functions.get_trading_fees(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting trading fees for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/crypto-news/opportunity-scanner', methods=['GET', 'OPTIONS'])
-def scan_crypto_opportunities():
-    """Scan for crypto opportunities"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/symbols/<exchange>', methods=['GET'])
+def get_symbols(exchange):
+    """Get available symbols for an exchange"""
     try:
-        from crypto_news_alerts import scan_opportunities
-        
-        opportunities = scan_opportunities(opportunity_type='all')
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'opportunities': opportunities,
-            'total_opportunities': len(opportunities),
-            'status': 'success'
-        })
+        result = trading_functions.get_symbols(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting symbols for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/crypto-news/market-intelligence', methods=['GET', 'OPTIONS'])
-def get_market_intelligence():
-    """Get comprehensive market intelligence"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/currencies/<exchange>', methods=['GET'])
+def get_currencies(exchange):
+    """Get available currencies for an exchange"""
     try:
-        from crypto_news_alerts import get_comprehensive_crypto_intelligence
-        
-        intelligence = get_comprehensive_crypto_intelligence()
-        
-        return jsonify(intelligence)
+        result = trading_functions.get_currencies(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting currencies for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/crypto-news/pump-dump-detector', methods=['GET', 'OPTIONS'])
-def detect_pump_dump_signals():
-    """Detect pump and dump signals"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/order-history/<exchange>', methods=['GET'])
+def get_order_history(exchange):
+    """Get order history for an exchange"""
     try:
-        from crypto_news_alerts import detect_pump_dump_signals
-        
-        signals = detect_pump_dump_signals(signal_type='both', confidence_threshold=60)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'pump_dump_signals': signals,
-            'status': 'success'
-        })
+        symbol = request.args.get('symbol')
+        limit = request.args.get('limit', 100, type=int)
+        result = trading_functions.get_order_history(exchange, symbol, limit)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting order history for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-# ============================================================================
-# KRAKEN ENDPOINTS
-# ============================================================================
-
-@app.route('/api/kraken/positions', methods=['GET', 'OPTIONS'])
-def get_kraken_positions():
-    """Get Kraken positions"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/trade-history/<exchange>', methods=['GET'])
+def get_trade_history(exchange):
+    """Get trade history for an exchange"""
     try:
-        from main import initialize_kraken, fetch_kraken_positions
-        
-        kraken_exchange = initialize_kraken()
-        positions = fetch_kraken_positions(kraken_exchange)
-        
-        # Calculate performance metrics
-        total_pnl = sum(p.get('unrealizedPnl', 0) for p in positions if p.get('unrealizedPnl'))
-        total_positions = len(positions)
-        profitable = len([p for p in positions if p.get('unrealizedPnl', 0) > 0])
-        
-        performance = {
-            'total_positions': total_positions,
-            'profitable_positions': profitable,
-            'losing_positions': total_positions - profitable,
-            'total_unrealized_pnl': total_pnl,
-            'success_rate': round((profitable / total_positions * 100), 2) if total_positions > 0 else 0
-        }
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'performance': performance,
-            'positions': positions,
-            'status': 'success'
-        })
+        symbol = request.args.get('symbol')
+        limit = request.args.get('limit', 100, type=int)
+        result = trading_functions.get_trade_history(exchange, symbol, limit)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting trade history for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/kraken/asset-allocation', methods=['GET', 'OPTIONS'])
-def get_kraken_asset_allocation():
-    """Get Kraken asset allocation breakdown"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/account-info/<exchange>', methods=['GET'])
+def get_account_info(exchange):
+    """Get account information for an exchange"""
     try:
-        from main import initialize_kraken
-        
-        kraken = initialize_kraken()
-        if kraken:
-            balance = kraken.fetch_balance()
-            
-            # Calculate allocation
-            allocation = {}
-            total_value = 0
-            
-            for currency, amounts in balance.items():
-                if isinstance(amounts, dict) and amounts.get('total', 0) > 0:
-                    allocation[currency] = amounts['total']
-                    total_value += amounts['total']  # This would need price conversion in real implementation
-            
-            return jsonify({
-                'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-                'allocation': allocation,
-                'total_assets': len(allocation),
-                'status': 'success'
-            })
-        else:
-            return jsonify({'error': 'Kraken not configured'}), 500
+        result = trading_functions.get_account_info(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error getting account info for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.route('/api/kraken/trading-stats', methods=['GET', 'OPTIONS'])
-def get_kraken_trading_stats():
-    """Get Kraken trading statistics"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
+@app.route('/api/transfer', methods=['POST'])
+def transfer_funds():
+    """Transfer funds between accounts"""
     try:
-        from main import initialize_kraken
+        data = request.get_json()
+        exchange = data.get('exchange')
+        currency = data.get('currency')
+        amount = data.get('amount')
+        from_account = data.get('from_account')
+        to_account = data.get('to_account')
         
-        kraken = initialize_kraken()
-        if kraken:
-            trades = kraken.fetch_my_trades(limit=100)
-            
-            # Calculate stats
-            total_trades = len(trades)
-            buy_trades = len([t for t in trades if t['side'] == 'buy'])
-            sell_trades = total_trades - buy_trades
-            total_fees = sum(t.get('fee', {}).get('cost', 0) for t in trades)
-            
-            stats = {
-                'total_trades': total_trades,
-                'buy_trades': buy_trades,
-                'sell_trades': sell_trades,
-                'total_fees_paid': total_fees,
-                'avg_trade_size': sum(t['amount'] for t in trades) / total_trades if total_trades > 0 else 0
-            }
-            
-            return jsonify({
-                'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-                'trading_stats': stats,
-                'recent_trades': trades[:10],  # Last 10 trades
-                'status': 'success'
-            })
-        else:
-            return jsonify({'error': 'Kraken not configured'}), 500
+        result = trading_functions.transfer_funds(exchange, currency, amount, from_account, to_account)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        logger.error(f"Error transferring funds: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-# ============================================================================
-# ERROR HANDLERS
-# ============================================================================
+@app.route('/api/portfolio/<exchange>', methods=['GET'])
+def get_portfolio(exchange):
+    """Get portfolio summary for an exchange"""
+    try:
+        result = trading_functions.get_portfolio(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
+    except Exception as e:
+        logger.error(f"Error getting portfolio for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({
-        'error': 'Endpoint not found',
-        'message': 'The requested API endpoint does not exist',
-        'available_endpoints': [
-            '/health', '/', '/api/live/all-exchanges', '/api/live/account-balances',
-            '/api/live/bingx-positions', '/api/live/blofin-positions', '/api/live/market-data/{symbol}',
-            '/api/bingx/klines/{symbol}', '/api/bingx/market-analysis/{symbol}',
-            '/api/bingx/candlestick-analysis/{symbol}', '/api/bingx/multi-timeframe/{symbol}',
-            '/api/chatgpt/account-summary', '/api/chatgpt/portfolio-analysis',
-            '/api/crypto-news/portfolio', '/api/crypto-news/symbols/{symbols}',
-            '/api/crypto-news/risk-alerts', '/api/crypto-news/bullish-signals',
-            '/api/crypto-news/breaking-news', '/api/crypto-news/opportunity-scanner',
-            '/api/crypto-news/market-intelligence', '/api/crypto-news/pump-dump-detector',
-            '/api/kraken/positions', '/api/kraken/balance', '/api/kraken/trade-history',
-            '/api/kraken/orders', '/api/kraken/market-data/{symbol}',
-            '/api/kraken/portfolio-performance', '/api/kraken/asset-allocation',
-            '/api/kraken/trading-stats'
-        ],
-        'status': 'error'
-    }), 404
+@app.route('/api/liquidation-history/<exchange>', methods=['GET'])
+def get_liquidation_history(exchange):
+    """Get liquidation history for an exchange"""
+    try:
+        result = trading_functions.get_liquidation_history(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
+    except Exception as e:
+        logger.error(f"Error getting liquidation history for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({
-        'error': 'Internal server error',
-        'message': 'An unexpected error occurred on the server',
-        'status': 'error'
-    }), 500
+@app.route('/api/futures-stats/<exchange>/<symbol>', methods=['GET'])
+def get_futures_stats(exchange, symbol):
+    """Get futures statistics for a symbol"""
+    try:
+        result = trading_functions.get_futures_stats(exchange, symbol)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
+    except Exception as e:
+        logger.error(f"Error getting futures stats for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-# ============================================================================
-# GRACEFUL SHUTDOWN
-# ============================================================================
+@app.route('/api/option-chain/<exchange>/<symbol>', methods=['GET'])
+def get_option_chain(exchange, symbol):
+    """Get option chain for a symbol"""
+    try:
+        result = trading_functions.get_option_chain(exchange, symbol)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
+    except Exception as e:
+        logger.error(f"Error getting option chain for {symbol} on {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully"""
-    print(f"\n🔄 Received signal {signum}. Shutting down gracefully...")
-    server.is_running = False
-    if server.alert_thread and server.alert_thread.is_alive():
-        print("⏳ Waiting for alert thread to finish...")
-        server.alert_thread.join(timeout=5)
-    print("✅ Server shutdown complete")
-    sys.exit(0)
+@app.route('/api/market-data/<exchange>', methods=['GET'])
+def get_market_data(exchange):
+    """Get comprehensive market data for an exchange"""
+    try:
+        result = trading_functions.get_market_data(exchange)
+        return jsonify(result)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': exchange}), 503
+    except Exception as e:
+        logger.error(f"Error getting market data for {exchange}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
-# Register signal handlers
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+@app.errorhandler(Exception)
+def handle_unexpected_error(error):
+    """Handle unexpected errors"""
+    logger.error(f"Unexpected error: {str(error)}\n{traceback.format_exc()}")
+    return jsonify({'error': 'An unexpected error occurred'}), 500
 
-# ============================================================================
-# MAIN SERVER STARTUP
-# ============================================================================
-
-if __name__ == "__main__":
-    print("🚀 STARTING COMPLETE CRYPTO TRADING API SERVER")
-    print("=" * 80)
+if __name__ == '__main__':
+    logger.info("Starting crypto trading server...")
+    logger.info(f"Available exchanges: {exchange_manager.get_available_exchanges()}")
     
-    # Get Railway configuration
     port = int(os.getenv('PORT', 5000))
-    is_railway = os.getenv('RAILWAY_ENVIRONMENT') is not None
-    
-    print(f"🌐 Platform: {'Railway Production' if is_railway else 'Local Development'}")
-    print(f"🔌 Port: {port}")
-    print(f"📡 Discord Configured: {bool(ALPHA_CHANNEL_ID and PORTFOLIO_CHANNEL_ID)}")
-    print(f"   📢 Alpha Channel: {ALPHA_CHANNEL_ID}")
-    print(f"   📊 Portfolio Channel: {PORTFOLIO_CHANNEL_ID}")
-    print(f"🎯 Total API Endpoints: 29")
-    print(f"🔗 API Categories: Health, Live Data, BingX Analysis, ChatGPT, CryptoNews, Kraken")
-    print("=" * 80)
-    
-    # Start alert scheduler
-    server.start_scheduler()
-    
-    # Start Flask server
-    try:
-        print("🎉 ALL 29 ENDPOINTS NOW ACTIVE!")
-        print("💎 Your $20K → $1M Alpha Hunting System is LIVE!")
-        
-        app.run(
-            host='0.0.0.0', 
-            port=port, 
-            debug=False, 
-            threaded=True
-        )
-    except Exception as e:
-        print(f"❌ Server startup error: {e}")
-        raiseexchange)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'source': 'Kraken Live API',
-            'positions': positions,
-            'status': 'success'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/kraken/balance', methods=['GET', 'OPTIONS'])
-def get_kraken_balance():
-    """Get Kraken account balance"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
-    try:
-        from main import initialize_kraken
-        
-        kraken = initialize_kraken()
-        if kraken:
-            balance = kraken.fetch_balance()
-            return jsonify({
-                'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-                'balance': balance,
-                'status': 'success'
-            })
-        else:
-            return jsonify({'error': 'Kraken not configured'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/kraken/trade-history', methods=['GET', 'OPTIONS'])
-def get_kraken_trade_history():
-    """Get Kraken trade history"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
-    try:
-        from main import initialize_kraken
-        
-        kraken = initialize_kraken()
-        if kraken:
-            limit = int(request.args.get('limit', 50))
-            trades = kraken.fetch_my_trades(limit=limit)
-            return jsonify({
-                'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-                'trades': trades,
-                'status': 'success'
-            })
-        else:
-            return jsonify({'error': 'Kraken not configured'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/kraken/orders', methods=['GET', 'OPTIONS'])
-def get_kraken_orders():
-    """Get Kraken open orders"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
-    try:
-        from main import initialize_kraken, fetch_kraken_orders
-        
-        kraken_exchange = initialize_kraken()
-        orders = fetch_kraken_orders(kraken_exchange)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'orders': orders,
-            'status': 'success'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/kraken/market-data/<symbol>', methods=['GET', 'OPTIONS'])
-def get_kraken_market_data(symbol):
-    """Get Kraken market data for symbol"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
-    try:
-        from main import get_kraken_price
-        
-        price = get_kraken_price(symbol)
-        
-        return jsonify({
-            'timestamp': datetime.now(pytz.timezone('US/Central')).isoformat(),
-            'symbol': symbol,
-            'price': price,
-            'status': 'success'
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/kraken/portfolio-performance', methods=['GET', 'OPTIONS'])
-def get_kraken_portfolio_performance():
-    """Get Kraken portfolio performance metrics"""
-    if request.method == 'OPTIONS':
-        return jsonify({'status': 'ok'})
-    
-    try:
-        from main import initialize_kraken, fetch_kraken_positions
-        
-        kraken_exchange = initialize_kraken()
-        positions = fetch_kraken_positions(kraken_
+    app.run(host='0.0.0.0', port=port, debug=False)
