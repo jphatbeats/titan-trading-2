@@ -47,11 +47,9 @@ except ImportError:
             try:
                 import ccxt
                 exchange_configs = {
-                    'binance': {},
+                    'bingx': {},
                     'kraken': {},
                     'blofin': {},
-                    'okx': {},
-                    'bybit': {},
                 }
                 
                 for exchange_name in exchange_configs:
