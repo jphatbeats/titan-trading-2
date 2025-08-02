@@ -5,13 +5,259 @@ from datetime import datetime
 import traceback
 
 # Import our custom modules with error handling
-from logger_config import setup_logging
-from error_handler import handle_exchange_error, ExchangeNotAvailableError
-from exchange_manager import ExchangeManager
-from trading_functions import TradingFunctions
+try:
+    from logger_config import setup_logging
+    setup_logging()
+except ImportError:
+    # Fallback logging setup if logger_config not found
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
 
-# Setup logging
-setup_logging()
+try:
+    from error_handler import handle_exchange_error, ExchangeNotAvailableError
+except ImportError:
+    # Fallback error handling
+    class ExchangeNotAvailableError(Exception):
+        pass
+    
+    def handle_exchange_error(func):
+        import functools
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                logger.error(f"Exchange error in {func.__name__}: {str(e)}")
+                raise ExchangeNotAvailableError(str(e))
+        return wrapper
+
+try:
+    from exchange_manager import ExchangeManager
+except ImportError:
+    # Fallback exchange manager
+    class ExchangeManager:
+        def __init__(self):
+            self.exchanges = {}
+            self._initialize_exchanges()
+        
+        def _initialize_exchanges(self):
+            try:
+                import ccxt
+                exchange_configs = {
+                    'binance': {},
+                    'kraken': {},
+                    'blofin': {},
+                    'okx': {},
+                    'bybit': {},
+                }
+                
+                for exchange_name in exchange_configs:
+                    try:
+                        if hasattr(ccxt, exchange_name):
+                            exchange_class = getattr(ccxt, exchange_name)
+                            self.exchanges[exchange_name] = exchange_class()
+                    except Exception as e:
+                        logger.warning(f"Failed to initialize {exchange_name}: {e}")
+            except ImportError:
+                logger.error("CCXT library not available")
+        
+        def get_exchange(self, exchange_name):
+            if exchange_name not in self.exchanges:
+                raise ValueError(f"Exchange {exchange_name} not available")
+            return self.exchanges[exchange_name]
+        
+        def get_available_exchanges(self):
+            return list(self.exchanges.keys())
+        
+        def get_exchange_status(self):
+            return {
+                'available_exchanges': self.get_available_exchanges(),
+                'failed_exchanges': {},
+                'detailed_status': {name: {'status': 'public_only', 'error': None} for name in self.exchanges}
+            }
+
+try:
+    from trading_functions import TradingFunctions
+except ImportError:
+    # Fallback trading functions with all methods
+    class TradingFunctions:
+        def __init__(self, exchange_manager):
+            self.exchange_manager = exchange_manager
+        
+        def get_ticker(self, exchange_name, symbol):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.fetch_ticker(symbol)
+        
+        def get_orderbook(self, exchange_name, symbol, limit=20):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.fetch_order_book(symbol, limit)
+        
+        def get_trades(self, exchange_name, symbol, limit=50):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.fetch_trades(symbol, None, limit)
+        
+        def get_balance(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.fetch_balance()
+        
+        def get_markets(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.markets
+        
+        def get_ohlcv(self, exchange_name, symbol, timeframe='1h', limit=100):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.fetch_ohlcv(symbol, timeframe, None, limit)
+        
+        def create_order(self, exchange_name, symbol, order_type, side, amount, price=None):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.create_order(symbol, order_type, side, amount, price)
+        
+        def get_orders(self, exchange_name, symbol=None):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if symbol:
+                return exchange.fetch_open_orders(symbol)
+            return exchange.fetch_open_orders()
+        
+        def cancel_order(self, exchange_name, order_id, symbol=None):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.cancel_order(order_id, symbol)
+        
+        def get_positions(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_positions'):
+                return exchange.fetch_positions()
+            raise Exception(f"Exchange {exchange_name} does not support positions")
+        
+        def get_funding_rate(self, exchange_name, symbol):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_funding_rate'):
+                return exchange.fetch_funding_rate(symbol)
+            raise Exception(f"Exchange {exchange_name} does not support funding rates")
+        
+        def set_leverage(self, exchange_name, symbol, leverage):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'set_leverage'):
+                return exchange.set_leverage(leverage, symbol)
+            raise Exception(f"Exchange {exchange_name} does not support leverage setting")
+        
+        def set_margin_mode(self, exchange_name, symbol, margin_mode):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'set_margin_mode'):
+                return exchange.set_margin_mode(margin_mode, symbol)
+            raise Exception(f"Exchange {exchange_name} does not support margin mode setting")
+        
+        def get_deposit_history(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_deposits'):
+                return exchange.fetch_deposits()
+            raise Exception(f"Exchange {exchange_name} does not support deposit history")
+        
+        def get_withdrawal_history(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_withdrawals'):
+                return exchange.fetch_withdrawals()
+            raise Exception(f"Exchange {exchange_name} does not support withdrawal history")
+        
+        def get_trading_fees(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_trading_fees'):
+                return exchange.fetch_trading_fees()
+            return {'trading': exchange.fees['trading'] if 'trading' in exchange.fees else {}}
+        
+        def get_symbols(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return list(exchange.symbols) if exchange.symbols else []
+        
+        def get_currencies(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            return exchange.currencies
+        
+        def get_order_history(self, exchange_name, symbol=None, limit=100):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_orders'):
+                return exchange.fetch_orders(symbol, None, limit)
+            raise Exception(f"Exchange {exchange_name} does not support order history")
+        
+        def get_trade_history(self, exchange_name, symbol=None, limit=100):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_my_trades'):
+                return exchange.fetch_my_trades(symbol, None, limit)
+            raise Exception(f"Exchange {exchange_name} does not support trade history")
+        
+        def get_account_info(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_account'):
+                return exchange.fetch_account()
+            return self.get_balance(exchange_name)
+        
+        def transfer_funds(self, exchange_name, currency, amount, from_account, to_account):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'transfer'):
+                return exchange.transfer(currency, amount, from_account, to_account)
+            raise Exception(f"Exchange {exchange_name} does not support fund transfers")
+        
+        def get_portfolio(self, exchange_name):
+            balance = self.get_balance(exchange_name)
+            portfolio = {
+                'balance': balance,
+                'total_value': 0,
+                'assets': []
+            }
+            for currency, data in balance.get('total', {}).items():
+                if isinstance(data, (int, float)) and data > 0:
+                    portfolio['assets'].append({
+                        'currency': currency,
+                        'amount': data
+                    })
+            return portfolio
+        
+        def get_liquidation_history(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_liquidations'):
+                return exchange.fetch_liquidations()
+            raise Exception(f"Exchange {exchange_name} does not support liquidation history")
+        
+        def get_futures_stats(self, exchange_name, symbol):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            stats = {}
+            try:
+                ticker = exchange.fetch_ticker(symbol)
+                stats['ticker'] = ticker
+            except:
+                pass
+            try:
+                if hasattr(exchange, 'fetch_funding_rate'):
+                    funding_rate = exchange.fetch_funding_rate(symbol)
+                    stats['funding_rate'] = funding_rate
+            except:
+                pass
+            return stats
+        
+        def get_option_chain(self, exchange_name, symbol):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            if hasattr(exchange, 'fetch_option_chain'):
+                return exchange.fetch_option_chain(symbol)
+            raise Exception(f"Exchange {exchange_name} does not support options")
+        
+        def get_market_data(self, exchange_name):
+            exchange = self.exchange_manager.get_exchange(exchange_name)
+            market_data = {
+                'exchange': exchange_name,
+                'markets': exchange.markets,
+                'symbols': list(exchange.symbols) if exchange.symbols else [],
+                'currencies': exchange.currencies
+            }
+            try:
+                if hasattr(exchange, 'fetch_tickers'):
+                    tickers = exchange.fetch_tickers()
+                    market_data['tickers'] = tickers
+            except:
+                pass
+            return market_data
+
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
