@@ -269,7 +269,7 @@ def root():
     """Root endpoint with API information"""
     return jsonify({
         'message': 'Crypto Trading API Server',
-        'version': '1.0.0',
+        'version': '2.0.0',
         'status': 'running',
         'available_endpoints': 29,
         'available_exchanges': exchange_manager.get_available_exchanges(),
@@ -300,6 +300,21 @@ def health_check():
 def exchanges_status():
     """Get status of all exchanges"""
     return jsonify(exchange_manager.get_exchange_status())
+
+@app.route('/api/live/all-exchanges', methods=['GET'])
+def get_all_exchanges():
+    """Get all available exchanges with their status"""
+    try:
+        status = exchange_manager.get_exchange_status()
+        return jsonify({
+            'exchanges': status['available_exchanges'],
+            'total_count': len(status['available_exchanges']),
+            'status': 'success',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting all exchanges: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/api/ticker/<exchange>/<symbol>', methods=['GET'])
 def get_ticker(exchange, symbol):
