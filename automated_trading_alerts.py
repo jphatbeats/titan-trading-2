@@ -17,6 +17,15 @@ import asyncio
 import aiohttp
 import requests
 
+# Import crypto news module
+try:
+    from crypto_news_api import CryptoNewsAPI
+    crypto_news_available = True
+    print("✅ Crypto news API module loaded successfully")
+except ImportError as e:
+    crypto_news_available = False
+    print(f"❌ Crypto news API not available: {e}")
+
 # Discord Multi-Channel Configuration
 DISCORD_WEBHOOKS = {
     'alerts': os.getenv('DISCORD_ALERTS_WEBHOOK'),        # Breaking news, risks (1398000506068009032)
@@ -679,6 +688,18 @@ async def run_alpha_analysis():
     """Twice daily comprehensive alpha analysis for #alpha-scans channel"""
     try:
         print("\n🎯 ALPHA ANALYSIS - Running comprehensive scan...")
+        
+        if not crypto_news_available:
+            # Fallback message when crypto news module not available
+            alpha_message = f"🎯 **ALPHA SCAN REPORT** 🎯\n"
+            alpha_message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+            alpha_message += f"⚠️ **System Notice**: Crypto news module temporarily unavailable\n"
+            alpha_message += f"📊 Portfolio analysis and basic alerts still running normally\n"
+            alpha_message += f"🔄 Alpha scans will resume once news service is restored\n\n"
+            
+            await send_discord_alert(alpha_message, 'alpha_scans')
+            print("⚠️ Alpha analysis sent fallback message due to unavailable crypto news module")
+            return
         
         # Get comprehensive market intelligence
         opportunities = await fetch_railway_api("/api/crypto-news/opportunity-scanner?limit=10")
