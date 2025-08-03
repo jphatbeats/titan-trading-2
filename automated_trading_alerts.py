@@ -13,11 +13,25 @@ from datetime import datetime
 import pytz
 import schedule
 import threading
+import asyncio
+import aiohttp
+import requests
 
-# We'll integrate with the Discord bot instead of webhooks
+# Discord Multi-Channel Configuration
+DISCORD_WEBHOOKS = {
+    'alerts': os.getenv('DISCORD_ALERTS_WEBHOOK'),        # Breaking news, risks (1398000506068009032)
+    'portfolio': os.getenv('DISCORD_PORTFOLIO_WEBHOOK'),  # Portfolio analysis (1399451217372905584)  
+    'alpha_scans': os.getenv('DISCORD_ALPHA_WEBHOOK')     # Trading opportunities (1399790636990857277)
+}
+
+# Legacy single webhook support (backward compatible)
+LEGACY_DISCORD_WEBHOOK = os.getenv('DISCORD_WEBHOOK_URL')
 
 # Google Sheets NoCode API URL
 GOOGLE_SHEETS_API_URL = "https://v1.nocodeapi.com/computerguy81/google_sheets/QxNdANWVhHvvXSzL"
+
+# Railway API Configuration  
+RAILWAY_API_URL = "https://titan-trading-2-production.up.railway.app"
 
 
 def cleanup_old_files(keep_count=3):
@@ -71,36 +85,80 @@ def find_latest_positions_csv():
         return None
 
 
-def convert_csv_to_json():
-    """Convert latest positions CSV to JSON format"""
+async def fetch_live_positions():
+    """Fetch live positions directly from Railway API"""
     try:
-        csv_file = find_latest_positions_csv()
-        if not csv_file:
-            return None
-
-        print(f"📄 Converting {csv_file} to JSON...")
-
-        # Read CSV and convert to JSON
-        df = pd.read_csv(csv_file)
-
-        # Clean and prepare data
-        df = df.fillna(0)  # Replace NaN with 0
-
-        # Convert to JSON format
-        positions_json = df.to_dict('records')
-
-        # Save JSON file
-        json_filename = csv_file.replace('.csv', '.json')
-        with open(json_filename, 'w') as f:
-            json.dump(positions_json, f, indent=2, default=str)
-
-        print(f"✅ Converted to {json_filename}")
-        print(f"📄 JSON file saved with {len(positions_json)} positions")
-        return positions_json
-
+        print("📡 Fetching live positions from Railway API...")
+        
+        all_positions = []
+        
+        # Fetch BingX positions
+        try:
+            bingx_data = await fetch_railway_api("/api/live/bingx-positions")
+            if bingx_data and bingx_data.get('positions'):
+                for pos in bingx_data['positions']:
+                    all_positions.append({
+                        'Symbol': pos.get('symbol', ''),
+                        'Platform': 'BingX',
+                        'Entry Price': pos.get('avgPrice', 0),
+                        'Mark Price': pos.get('markPrice', 0),
+                        'Unrealized PnL %': pos.get('unrealizedPnl_percent', 0),
+                        'Side (LONG/SHORT)': pos.get('side', ''),
+                        'Margin Size ($)': pos.get('initialMargin', 0),
+                        'Leverage': pos.get('leverage', 1),
+                        'SL Set?': '❌'  # Default, would need additional API call to check
+                    })
+                print(f"✅ Fetched {len(bingx_data['positions'])} BingX positions")
+        except Exception as e:
+            print(f"⚠️ BingX positions error: {e}")
+        
+        # Fetch Kraken positions
+        try:
+            kraken_data = await fetch_railway_api("/api/kraken/positions")
+            if kraken_data and kraken_data.get('positions'):
+                for symbol, pos in kraken_data['positions'].items():
+                    if float(pos.get('size', 0)) != 0:  # Only active positions
+                        all_positions.append({
+                            'Symbol': symbol,
+                            'Platform': 'Kraken',
+                            'Entry Price': pos.get('avgPrice', 0),
+                            'Mark Price': pos.get('markPrice', 0),
+                            'Unrealized PnL %': pos.get('unrealizedPnl_percent', 0),
+                            'Side (LONG/SHORT)': 'LONG' if float(pos.get('size', 0)) > 0 else 'SHORT',
+                            'Margin Size ($)': abs(float(pos.get('cost', 0))),
+                            'Leverage': pos.get('leverage', 1),
+                            'SL Set?': '❌'
+                        })
+                print(f"✅ Fetched {len([p for p in kraken_data['positions'].values() if float(p.get('size', 0)) != 0])} Kraken positions")
+        except Exception as e:
+            print(f"⚠️ Kraken positions error: {e}")
+            
+        # Fetch Blofin positions  
+        try:
+            blofin_data = await fetch_railway_api("/api/live/blofin-positions")
+            if blofin_data and blofin_data.get('positions'):
+                for pos in blofin_data['positions']:
+                    all_positions.append({
+                        'Symbol': pos.get('symbol', ''),
+                        'Platform': 'Blofin',
+                        'Entry Price': pos.get('avgPrice', 0),
+                        'Mark Price': pos.get('markPrice', 0),
+                        'Unrealized PnL %': pos.get('unrealizedPnl_percent', 0),
+                        'Side (LONG/SHORT)': pos.get('side', ''),
+                        'Margin Size ($)': pos.get('initialMargin', 0),
+                        'Leverage': pos.get('leverage', 1),
+                        'SL Set?': '❌'
+                    })
+                print(f"✅ Fetched {len(blofin_data['positions'])} Blofin positions")
+        except Exception as e:
+            print(f"⚠️ Blofin positions error: {e}")
+        
+        print(f"📊 Total live positions fetched: {len(all_positions)}")
+        return all_positions
+        
     except Exception as e:
-        print(f"❌ Error converting CSV to JSON: {e}")
-        return None
+        print(f"❌ Error fetching live positions: {e}")
+        return []
 
 
 def calculate_simulated_rsi(pnl_percentage):
@@ -350,6 +408,55 @@ def send_to_google_sheets():
         return False
 
 
+async def fetch_railway_api(endpoint):
+    """Fetch data from Railway API"""
+    try:
+        url = f"{RAILWAY_API_URL}{endpoint}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    print(f"❌ Railway API error {response.status} for {endpoint}")
+                    return None
+    except Exception as e:
+        print(f"❌ Railway API fetch error: {e}")
+        return None
+
+async def send_discord_alert(message, channel='portfolio'):
+    """Send alert to Discord channel via webhook"""
+    try:
+        # Get webhook URL
+        webhook_url = DISCORD_WEBHOOKS.get(channel) or LEGACY_DISCORD_WEBHOOK
+        if not webhook_url:
+            print(f"❌ No Discord webhook configured for {channel}")
+            return False
+        
+        # Channel-specific bot names
+        bot_names = {
+            'alerts': 'Market Alerts Bot',
+            'portfolio': 'Portfolio Analysis Bot',
+            'alpha_scans': 'Alpha Scanner Bot'
+        }
+        
+        payload = {
+            "content": message,
+            "username": bot_names.get(channel, "Trading Alerts Bot")
+        }
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(webhook_url, json=payload) as response:
+                if response.status == 204:
+                    print(f"✅ Discord alert sent to #{channel}")
+                    return True
+                else:
+                    print(f"❌ Discord webhook failed: {response.status}")
+                    return False
+                    
+    except Exception as e:
+        print(f"❌ Discord send error: {e}")
+        return False
+
 def prepare_alert_data(alerts):
     """Prepare alert data for Discord bot integration"""
     if not alerts:
@@ -401,6 +508,89 @@ def prepare_alert_data(alerts):
         print(f"❌ Error preparing alert data: {e}")
         return None
 
+async def generate_enhanced_alerts(positions_df):
+    """Generate enhanced alerts using Railway API intelligence"""
+    enhanced_alerts = []
+    
+    try:
+        # Extract unique symbols from positions
+        if positions_df is not None and not positions_df.empty:
+            symbols = positions_df['symbol'].unique().tolist()
+            portfolio_symbols = [symbol.replace('-USDT', '').replace('/USD', '') for symbol in symbols[:10]]  # Top 10
+        else:
+            portfolio_symbols = ['BTC', 'ETH', 'SOL']  # Default portfolio
+        
+        print(f"🔍 Analyzing {len(portfolio_symbols)} symbols: {', '.join(portfolio_symbols)}")
+        
+        async with aiohttp.ClientSession() as session:
+            # Get portfolio-specific news
+            portfolio_url = f"{RAILWAY_API_URL}/api/crypto-news/portfolio"
+            portfolio_params = {'symbols': ','.join(portfolio_symbols)}
+            
+            async with session.get(portfolio_url, params=portfolio_params) as response:
+                if response.status == 200:
+                    portfolio_news = await response.json()
+                    if portfolio_news.get('success') and portfolio_news.get('data', {}).get('articles'):
+                        articles = portfolio_news['data']['articles'][:3]  # Top 3
+                        for article in articles:
+                            enhanced_alerts.append({
+                                'type': 'portfolio_news',
+                                'symbol': 'PORTFOLIO',
+                                'platform': 'News',
+                                'message': f"📰 {article.get('title', 'News update')[:80]}... ({article.get('source_name', 'Unknown')})"
+                            })
+            
+            # Get risk alerts  
+            risk_url = f"{RAILWAY_API_URL}/api/crypto-news/risk-alerts"
+            async with session.get(risk_url) as response:
+                if response.status == 200:
+                    risk_data = await response.json()
+                    if risk_data.get('success') and risk_data.get('data', {}).get('alerts'):
+                        risk_articles = risk_data['data']['alerts'][:2]  # Top 2
+                        for article in risk_articles:
+                            enhanced_alerts.append({
+                                'type': 'risk_alert',
+                                'symbol': 'MARKET',
+                                'platform': 'Risk',
+                                'message': f"⚠️ {article.get('title', 'Risk warning')[:80]}..."
+                            })
+            
+            # Get bullish signals
+            bullish_url = f"{RAILWAY_API_URL}/api/crypto-news/bullish-signals"
+            async with session.get(bullish_url) as response:
+                if response.status == 200:
+                    bullish_data = await response.json()
+                    if bullish_data.get('success') and bullish_data.get('data', {}).get('signals'):
+                        bullish_articles = bullish_data['data']['signals'][:2]  # Top 2
+                        for article in bullish_articles:
+                            enhanced_alerts.append({
+                                'type': 'bullish_signal',
+                                'symbol': 'MARKET',
+                                'platform': 'Signals',
+                                'message': f"📈 {article.get('title', 'Bullish signal')[:80]}..."
+                            })
+            
+            # Get trading opportunities
+            opp_url = f"{RAILWAY_API_URL}/api/crypto-news/opportunity-scanner"
+            async with session.get(opp_url) as response:
+                if response.status == 200:
+                    opp_data = await response.json()
+                    if opp_data.get('success') and opp_data.get('data', {}).get('opportunities'):
+                        opportunities = opp_data['data']['opportunities'][:2]  # Top 2
+                        for opp in opportunities:
+                            enhanced_alerts.append({
+                                'type': 'opportunity',
+                                'symbol': 'MARKET',
+                                'platform': 'Opportunities',
+                                'message': f"🔍 {opp.get('title', 'Trading opportunity')[:80]}..."
+                            })
+        
+        return enhanced_alerts
+        
+    except Exception as e:
+        print(f"❌ Error in enhanced alerts: {e}")
+        return []
+
 def save_alerts_for_bot(alerts):
     """Save alerts to a file that the Discord bot can read"""
     if not alerts:
@@ -424,24 +614,211 @@ def save_alerts_for_bot(alerts):
         return False
 
 
-def run_trading_analysis():
-    """Main function to run complete trading analysis"""
-    print("\n" + "=" * 60)
-    print("🤖 AUTOMATED TRADING ANALYSIS STARTING")
-    print(
-        f"🕐 Time: {datetime.now(pytz.timezone('US/Central')).strftime('%Y-%m-%d %I:%M %p CST')}"
-    )
+async def run_portfolio_analysis():
+    """Hourly portfolio analysis for #portfolio channel"""
+    try:
+        print("\n📊 PORTFOLIO ANALYSIS - Running hourly check...")
+        
+        # Get live position data from Railway API
+        positions = await fetch_live_positions()
+        
+        if not positions:
+            print("⚠️ No positions data available")
+            return
+        
+        positions_df = pd.DataFrame(positions)
+        alerts = []
+        
+        # Traditional trading analysis (RSI, PnL, etc.)
+        rsi_alerts = analyze_trading_conditions(positions)
+        alerts.extend(rsi_alerts)
+        
+        # Get portfolio-specific news
+        portfolio_news = await fetch_railway_api("/api/crypto-news/portfolio")
+        
+        # Format portfolio message
+        if alerts or (portfolio_news and portfolio_news.get('articles')):
+            portfolio_message = f"📊 **PORTFOLIO UPDATE** 📊\n\n"
+            
+            # Add trading signals
+            if alerts:
+                portfolio_message += f"🎯 **TRADING SIGNALS:**\n"
+                for alert in alerts[:3]:
+                    portfolio_message += f"• {alert.get('message', alert.get('type', 'Signal'))}\n"
+                portfolio_message += f"\n"
+            
+            # Add relevant news
+            if portfolio_news and portfolio_news.get('articles'):
+                portfolio_message += f"📰 **PORTFOLIO NEWS:**\n"
+                for article in portfolio_news['articles'][:2]:
+                    title = article.get('title', 'Market Update')
+                    url = article.get('url', article.get('link', ''))
+                    source = article.get('source_name', article.get('source', ''))
+                    tickers = article.get('tickers', [])
+                    
+                    if url:
+                        portfolio_message += f"**[{title}]({url})**\n"
+                    else:
+                        portfolio_message += f"**{title}**\n"
+                    
+                    if source:
+                        portfolio_message += f"📰 {source}"
+                    if tickers:
+                        portfolio_message += f" | 🎯 {', '.join(tickers[:3])}"
+                    portfolio_message += f"\n\n"
+            
+            await send_discord_alert(portfolio_message, 'portfolio')
+            print("✅ Portfolio analysis sent to Discord")
+        else:
+            print("📊 No significant portfolio updates to report")
+            
+    except Exception as e:
+        print(f"❌ Portfolio analysis error: {e}")
+
+async def run_alpha_analysis():
+    """Twice daily comprehensive alpha analysis for #alpha-scans channel"""
+    try:
+        print("\n🎯 ALPHA ANALYSIS - Running comprehensive scan...")
+        
+        # Get comprehensive market intelligence
+        opportunities = await fetch_railway_api("/api/crypto-news/opportunity-scanner?limit=10")
+        bullish_signals = await fetch_railway_api("/api/crypto-news/bullish-signals?limit=5")
+        market_intelligence = await fetch_railway_api("/api/crypto-news/market-intelligence?limit=5")
+        
+        alpha_message = f"🎯 **ALPHA SCAN REPORT** 🎯\n"
+        alpha_message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        
+        # Trading opportunities
+        if opportunities and opportunities.get('opportunities'):
+            alpha_message += f"🚀 **TRADING OPPORTUNITIES:**\n"
+            for opp in opportunities['opportunities'][:3]:
+                title = opp.get('title', 'Opportunity detected')
+                url = opp.get('url', opp.get('link', ''))
+                symbol = opp.get('symbol', '')
+                source = opp.get('source_name', opp.get('source', ''))
+                sentiment = opp.get('sentiment', '')
+                
+                if url:
+                    alpha_message += f"💰 **[{title}]({url})**\n"
+                else:
+                    alpha_message += f"💰 **{title}**\n"
+                
+                if symbol:
+                    alpha_message += f"🎯 **{symbol}** | "
+                if source:
+                    alpha_message += f"📰 {source} | "
+                if sentiment:
+                    sentiment_emoji = "📈" if sentiment.lower() == "positive" else "📉" if sentiment.lower() == "negative" else "➡️"
+                    alpha_message += f"{sentiment_emoji} {sentiment.title()}"
+                alpha_message += f"\n\n"
+        
+        # Bullish signals for long-term holds
+        if bullish_signals and bullish_signals.get('signals'):
+            alpha_message += f"📈 **LONG-TERM BULLISH SIGNALS:**\n"
+            for signal in bullish_signals['signals'][:2]:
+                title = signal.get('title', 'Bullish signal')
+                url = signal.get('url', signal.get('link', ''))
+                symbol = signal.get('symbol', '')
+                
+                if url:
+                    alpha_message += f"🔥 **[{title}]({url})**\n"
+                else:
+                    alpha_message += f"🔥 **{title}**\n"
+                    
+                if symbol:
+                    alpha_message += f"💎 **{symbol}** - Long-term hold candidate\n\n"
+        
+        # Market intelligence for early entries
+        if market_intelligence and market_intelligence.get('intelligence'):
+            alpha_message += f"🧠 **MARKET INTELLIGENCE:**\n"
+            for intel in market_intelligence['intelligence'][:2]:
+                title = intel.get('title', 'Market insight')
+                url = intel.get('url', intel.get('link', ''))
+                
+                if url:
+                    alpha_message += f"⚡ **[{title}]({url})**\n"
+                else:
+                    alpha_message += f"⚡ **{title}**\n"
+                alpha_message += f"🎯 Early entry opportunity detected\n\n"
+        
+        # Add footer with next scan time
+        next_scan = "09:00 UTC" if datetime.now().hour >= 21 or datetime.now().hour < 9 else "21:00 UTC"
+        alpha_message += f"⏰ Next Alpha Scan: {next_scan}"
+        
+        await send_discord_alert(alpha_message, 'alpha_scans')
+        print("✅ Alpha analysis sent to Discord")
+        
+    except Exception as e:
+        print(f"❌ Alpha analysis error: {e}")
+
+async def check_breaking_alerts():
+    """Check for breaking news every 15 minutes - only sends if urgent"""
+    try:
+        print("\n🚨 Checking for breaking alerts...")
+        
+        # Get high priority alerts only
+        priority_alerts = await fetch_railway_api("/api/alerts/prioritized?limit=5&urgency=HIGH")
+        
+        if not priority_alerts or not priority_alerts.get('alerts'):
+            print("🔍 No urgent breaking alerts found")
+            return
+        
+        # Filter for truly breaking news from Tier 1 sources
+        breaking_alerts = []
+        
+        for alert in priority_alerts['alerts']:
+            # Only send if it's HIGH urgency and from Tier 1 sources
+            urgency = alert.get('urgency', '').upper()
+            source = alert.get('source_name', alert.get('source', ''))
+            
+            if urgency == 'HIGH' and source in ['Coindesk', 'CryptoSlate', 'The Block', 'Decrypt']:
+                breaking_alerts.append(alert)
+        
+        if breaking_alerts:
+            alert_message = f"🚨 **BREAKING ALERT** 🚨\n\n"
+            
+            for alert in breaking_alerts[:2]:  # Max 2 breaking alerts
+                title = alert.get('title', 'Breaking news')
+                url = alert.get('url', alert.get('link', ''))
+                source = alert.get('source_name', alert.get('source', ''))
+                tickers = alert.get('tickers', [])
+                
+                if url:
+                    alert_message += f"🔴 **[{title}]({url})**\n"
+                else:
+                    alert_message += f"🔴 **{title}**\n"
+                
+                if source:
+                    alert_message += f"📰 {source}"
+                if tickers:
+                    alert_message += f" | ⚠️ {', '.join(tickers[:3])}"
+                alert_message += f"\n\n"
+            
+            await send_discord_alert(alert_message, 'alerts')
+            print(f"🚨 Breaking alert sent: {len(breaking_alerts)} urgent items")
+        else:
+            print("🔍 No breaking alerts meet urgency criteria")
+            
+    except Exception as e:
+        print(f"❌ Breaking alerts check error: {e}")
+
+async def run_trading_analysis_async():
+    """Legacy async version of trading analysis - now calls specific functions"""
+    print(f"\n🎯 ANALYSIS STARTED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
     try:
-        # Step 1: Convert CSV to JSON
-        print("\n📋 Step 1: Converting positions CSV to JSON...")
-        positions = convert_csv_to_json()
+        # Step 1: Fetch live positions from Railway API
+        print("\n📡 Step 1: Fetching live positions from Railway API...")
+        positions = await fetch_live_positions()
         if not positions:
-            print("❌ No positions data available - skipping analysis")
+            print("❌ No live positions available - skipping analysis")
             return
 
-        print(f"✅ Loaded {len(positions)} positions for analysis")
+        print(f"✅ Loaded {len(positions)} live positions for analysis")
+        
+        # Convert to DataFrame for enhanced analysis
+        positions_df = pd.DataFrame(positions) if positions else None
 
         # Step 2: Analyze trading conditions
         print("\n🔍 Step 2: Analyzing trading conditions...")
@@ -451,30 +828,217 @@ def run_trading_analysis():
         print("\n📤 Step 3: Processing alerts...")
         if alerts:
             print(f"🚨 Found {len(alerts)} trading alerts!")
+        else:
+            print("✅ No alerts triggered - all positions within normal parameters")
+            alerts = []  # Initialize empty list
+
+        # Step 4: Google Sheets sync disabled
+        print("\n📊 Step 4: Google Sheets sync disabled by user")
+
+        # Step 5: Generate enhanced news and market alerts using Railway API
+        print("\n📰 Step 5: Fetching enhanced crypto intelligence...")
+        try:
+            enhanced_alerts = await generate_enhanced_alerts(positions_df)
+            if enhanced_alerts:
+                print(f"📰 Found {len(enhanced_alerts)} enhanced alerts from Railway API")
+                alerts.extend(enhanced_alerts)
+            else:
+                print("📰 No relevant enhanced alerts found")
+        except Exception as e:
+            print(f"❌ Enhanced alerts error: {e}")
+            # Use new prioritized alerts endpoint
+            try:
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{RAILWAY_API_URL}/api/alerts/prioritized?limit=10&urgency=HIGH") as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            priority_alerts = data.get('alerts', [])
+                            if priority_alerts:
+                                print(f"📰 Found {len(priority_alerts)} high priority alerts")
+                                # Convert to our alert format
+                                for alert in priority_alerts:
+                                    alerts.append({
+                                        'type': 'priority_news',
+                                        'title': alert.get('title', ''),
+                                        'urgency': alert.get('urgency', 'HIGH'),
+                                        'source': alert.get('source_name', ''),
+                                        'tickers': alert.get('tickers', [])
+                                    })
+                            else:
+                                print("📰 No high priority alerts found")
+                        else:
+                            print(f"❌ Priority alerts API error: {response.status}")
+            except Exception as priority_e:
+                print(f"❌ Priority alerts error: {priority_e}")
+
+        # Save all alerts
+        if alerts:
+            success = save_alerts_for_bot(alerts)
+            if success:
+                print(f"✅ Saved {len(alerts)} total alerts for Discord bot")
+            else:
+                print("❌ Failed to save alerts")
+
+        # Step 6: GitHub upload disabled
+        print("\n📤 Step 6: GitHub upload disabled by user")
+
+        # Step 7: Clean up old files
+        print("\n🧹 Step 7: Cleaning up old files...")
+        cleanup_old_files(keep_count=3)  # Keep 3 most recent files
+
+        print("\n🎯 Enhanced trading analysis completed successfully!")
+        print("⏰ Next analysis in 1 hour...")
+
+    except Exception as e:
+        print(f"❌ Error in trading analysis: {e}")
+
+async def run_trading_analysis():
+    """Main function to run complete trading analysis"""
+    print("\n" + "=" * 60)
+    print("🤖 AUTOMATED TRADING ANALYSIS STARTING")
+    print(
+        f"🕐 Time: {datetime.now(pytz.timezone('US/Central')).strftime('%Y-%m-%d %I:%M %p CST')}"
+    )
+    print("=" * 60)
+
+    try:
+        # Step 1: Fetch live positions from Railway API
+        print("\n📡 Step 1: Fetching live positions from Railway API...")
+        positions = await fetch_live_positions()
+        if not positions:
+            print("❌ No live positions available - skipping analysis")
+            return
+
+        print(f"✅ Loaded {len(positions)} live positions for analysis")
+
+        # Step 2: Analyze trading conditions
+        print("\n🔍 Step 2: Analyzing trading conditions...")
+        alerts = analyze_trading_conditions(positions)
+
+        # Step 3: Process alerts for Discord bot and send to channels
+        print("\n📤 Step 3: Processing alerts...")
+        if alerts:
+            print(f"🚨 Found {len(alerts)} trading alerts!")
+            
+            # Save alerts to JSON (existing functionality)
             success = save_alerts_for_bot(alerts)
             if success:
                 print("✅ Alerts saved for Discord bot")
             else:
                 print("❌ Failed to save alerts")
+            
+            # Send portfolio alerts to #portfolio channel
+            try:
+                alert_data = prepare_alert_data(alerts)
+                if alert_data and alert_data.get('message'):
+                    portfolio_message = f"💼 **PORTFOLIO ANALYSIS** 💼\n{alert_data['message']}"
+                    await send_discord_alert(portfolio_message, 'portfolio')
+            except Exception as e:
+                print(f"❌ Error sending portfolio alerts: {e}")
+                
         else:
             print("✅ No alerts triggered - all positions within normal parameters")
 
         # Step 4: Google Sheets sync disabled
         print("\n📊 Step 4: Google Sheets sync disabled by user")
 
-        # Step 5: Generate news alerts
-        print("\n📰 Step 5: Fetching crypto news alerts...")
+        # Step 5: Generate enhanced news and market alerts using Railway API
+        print("\n📰 Step 5: Fetching enhanced crypto intelligence...")
         try:
-            from crypto_news_alerts import generate_news_alerts
-            news_alerts = generate_news_alerts()
-            if news_alerts:
-                print(f"📰 Found {len(news_alerts)} news alerts")
-                # Add news alerts to main alerts for Discord
-                alerts.extend(news_alerts)
-            else:
-                print("📰 No relevant news alerts found")
+            # Get breaking news and risk alerts for #alerts channel
+            breaking_news = await fetch_railway_api("/api/crypto-news/breaking-news")
+            risk_alerts = await fetch_railway_api("/api/crypto-news/risk-alerts")
+            opportunities = await fetch_railway_api("/api/crypto-news/opportunity-scanner")
+            
+            # Send breaking news to #alerts channel with clickable links
+            if breaking_news and breaking_news.get('news'):
+                news_message = f"🚨 **BREAKING CRYPTO NEWS** 🚨\n"
+                for item in breaking_news['news'][:3]:  # Top 3 news
+                    title = item.get('title', 'Market Update')
+                    url = item.get('url', item.get('link', ''))
+                    source = item.get('source_name', item.get('source', ''))
+                    tickers = item.get('tickers', [])
+                    
+                    if url:
+                        news_message += f"📰 **[{title}]({url})**\n"
+                    else:
+                        news_message += f"📰 **{title}**\n"
+                    
+                    if source:
+                        news_message += f"📰 {source}"
+                    if tickers:
+                        news_message += f" | 🎯 {', '.join(tickers[:3])}"
+                    news_message += f"\n\n"
+                
+                await send_discord_alert(news_message, 'alerts')
+            
+            # Send risk alerts to #alerts channel with urgency indicators
+            if risk_alerts and risk_alerts.get('alerts'):
+                risk_message = f"⚠️ **RISK ALERTS** ⚠️\n"
+                for alert in risk_alerts['alerts'][:3]:  # Top 3 risks
+                    title = alert.get('title', alert.get('message', 'Risk detected'))
+                    url = alert.get('url', alert.get('link', ''))
+                    urgency = alert.get('urgency', 'MEDIUM')
+                    source = alert.get('source_name', alert.get('source', ''))
+                    tickers = alert.get('tickers', [])
+                    
+                    # Urgency indicator
+                    urgency_emoji = "🔴" if urgency == "HIGH" else "🟡" if urgency == "MEDIUM" else "🟢"
+                    
+                    if url:
+                        risk_message += f"{urgency_emoji} **[{title}]({url})**\n"
+                    else:
+                        risk_message += f"{urgency_emoji} **{title}**\n"
+                    
+                    if source:
+                        risk_message += f"📰 {source}"
+                    if tickers:
+                        risk_message += f" | ⚠️ {', '.join(tickers[:3])}"
+                    risk_message += f"\n\n"
+                
+                await send_discord_alert(risk_message, 'alerts')
+            
+            # Send opportunities to #alpha-scans channel with clickable links
+            if opportunities and opportunities.get('opportunities'):
+                opp_message = f"🎯 **TRADING OPPORTUNITIES** 🎯\n"
+                for opp in opportunities['opportunities'][:3]:  # Top 3 opportunities
+                    title = opp.get('title', f"{opp.get('symbol', '')} - {opp.get('signal', 'Signal detected')}")
+                    url = opp.get('url', opp.get('link', ''))
+                    symbol = opp.get('symbol', '')
+                    source = opp.get('source_name', opp.get('source', ''))
+                    sentiment = opp.get('sentiment', '')
+                    
+                    if url:
+                        opp_message += f"🚀 **[{title}]({url})**\n"
+                    else:
+                        opp_message += f"🚀 **{title}**\n"
+                    
+                    if symbol:
+                        opp_message += f"💰 **{symbol}**"
+                    if source:
+                        opp_message += f" | 📰 {source}"
+                    if sentiment:
+                        sentiment_emoji = "📈" if sentiment.lower() == "positive" else "📉" if sentiment.lower() == "negative" else "➡️"
+                        opp_message += f" | {sentiment_emoji} {sentiment.title()}"
+                    opp_message += f"\n\n"
+                
+                await send_discord_alert(opp_message, 'alpha_scans')
+                
+            print("📰 Enhanced alerts sent to appropriate Discord channels")
+            
         except Exception as e:
-            print(f"❌ News alerts error: {e}")
+            print(f"❌ Enhanced alerts error: {e}")
+            # Fallback to original news alerts for #alerts channel
+            try:
+                from crypto_news_alerts import generate_news_alerts
+                news_alerts = generate_news_alerts()
+                if news_alerts:
+                    print(f"📰 Fallback: Found {len(news_alerts)} news alerts")
+                    fallback_message = f"📰 **CRYPTO NEWS UPDATE** 📰\n{str(news_alerts)[:500]}..."
+                    await send_discord_alert(fallback_message, 'alerts')
+            except Exception as fallback_e:
+                print(f"❌ Fallback news alerts error: {fallback_e}")
 
         # Step 6: GitHub upload disabled
         print("\n📤 Step 6: GitHub upload disabled by user")
@@ -501,12 +1065,18 @@ def main():
     """Main function with hourly scheduling"""
     print("🚀 AUTOMATED TRADING ALERTS SYSTEM")
     print("=" * 50)
-    print("📊 Features (OPTIMIZED THRESHOLDS):")
+    print("📊 MULTI-CHANNEL DISCORD INTEGRATION:")
+    print("  🚨 #alerts: Breaking news & market crashes (as needed)")
+    print("  📊 #portfolio: Hourly analysis & trading signals")
+    print("  🎯 #alpha-scans: Comprehensive reports (9AM & 9PM)")
+    print("=" * 50)
+    print("📈 Features:")
     print("  • RSI Analysis (Overbought > 72, Oversold < 28)")
     print("  • PnL Monitoring (Loss alerts < -8%)")
     print("  • Risk Management (No SL warnings > $150)")
     print("  • High Profit Alerts (> +35%)")
-    print("  • Hourly automated analysis")
+    print("  • Real crypto news integration")
+    print("  • Long-term holds & early entry detection")
     print("=" * 50)
 
     print("🤖 Trading Alert System integrates with Discord bot")
@@ -514,11 +1084,20 @@ def main():
 
     # Run initial analysis
     print("\n🎯 Running initial analysis...")
-    run_trading_analysis()
+    asyncio.run(run_trading_analysis())
 
-    # Schedule hourly runs
-    print("\n⏰ Setting up hourly schedule...")
-    schedule.every().hour.do(run_trading_analysis)
+    # Schedule different frequencies for different channels
+    print("\n⏰ Setting up multi-channel schedule...")
+    
+    # Portfolio analysis every hour
+    schedule.every().hour.do(lambda: asyncio.run(run_portfolio_analysis()))
+    
+    # Alpha scans twice daily (9 AM and 9 PM)
+    schedule.every().day.at("09:00").do(lambda: asyncio.run(run_alpha_analysis()))
+    schedule.every().day.at("21:00").do(lambda: asyncio.run(run_alpha_analysis()))
+    
+    # Breaking news alerts check every 15 minutes (only sends if urgent)
+    schedule.every(15).minutes.do(lambda: asyncio.run(check_breaking_alerts()))
 
     # Start scheduler in background thread
     scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
@@ -544,7 +1123,7 @@ def run_automated_alerts():
     print("📋 Alerts will be processed by Discord bot integration")
     
     # Run the analysis
-    run_trading_analysis()
+    asyncio.run(run_trading_analysis())
     print("✅ Automated alerts completed!")
 
 
