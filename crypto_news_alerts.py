@@ -6,10 +6,7 @@ Uses only endpoints available on basic CryptoNews API plan
 
 import requests
 from datetime import datetime, timedelta
-import pandas as pd
-import glob
 import os
-import pytz
 
 # CryptoNews API Configuration
 API_TOKEN = os.getenv('CRYPTONEWS_API_TOKEN', 'ayimav7nlptgzetysg9dwhqteampvoirtfx5orqk')
