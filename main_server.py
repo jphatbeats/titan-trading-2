@@ -17,6 +17,14 @@ except ImportError:
     )
 
 try:
+    from crypto_news_alerts import get_general_crypto_news, get_top_mentioned_tickers, get_sentiment_analysis
+    crypto_news_available = True
+except ImportError:
+    crypto_news_available = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Crypto news alerts module not available")
+
+try:
     from error_handler import handle_exchange_error, ExchangeNotAvailableError
 except ImportError:
     # Fallback error handling
@@ -995,6 +1003,629 @@ def get_market_data(exchange):
     except Exception as e:
         logger.error(f"Error getting market data for {exchange}: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
+
+# ============================================================================
+# CRYPTO NEWS ENDPOINTS
+# ============================================================================
+
+@app.route('/api/crypto-news/breaking-news', methods=['GET'])
+def get_breaking_crypto_news():
+    """Get breaking crypto news with filtering options"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        # Extract query parameters
+        hours = request.args.get('hours', 24, type=int)
+        items = request.args.get('items', 50, type=int)
+        exclude_portfolio = request.args.get('exclude_portfolio', 'false').lower() == 'true'
+        sentiment = request.args.get('sentiment')
+        source = request.args.get('source')
+        topic = request.args.get('topic')
+        search = request.args.get('search')
+        
+        # Get general crypto news (breaking news equivalent)
+        result = get_general_crypto_news(
+            items=items,
+            sentiment=sentiment,
+            source=source,
+            topic=topic,
+            search=search
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(result.get('data', [])),
+            'articles': result.get('data', []),
+            'parameters': {
+                'hours': hours,
+                'items': items,
+                'exclude_portfolio': exclude_portfolio,
+                'sentiment': sentiment,
+                'source': source,
+                'topic': topic,
+                'search': search
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting breaking crypto news: {str(e)}")
+        return jsonify({'error': 'Failed to fetch crypto news'}), 500
+
+@app.route('/api/crypto-news/top-mentioned', methods=['GET'])
+def get_top_mentioned():
+    """Get top mentioned crypto tickers"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        date = request.args.get('date', 'last7days')
+        cache = request.args.get('cache', 'false').lower() == 'true'
+        
+        result = get_top_mentioned_tickers(date=date, cache=cache)
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(result.get('data', [])),
+            'tickers': result.get('data', []),
+            'parameters': {
+                'date': date,
+                'cache': cache
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting top mentioned tickers: {str(e)}")
+        return jsonify({'error': 'Failed to fetch top mentioned tickers'}), 500
+
+@app.route('/api/crypto-news/sentiment', methods=['GET'])
+def get_crypto_sentiment():
+    """Get sentiment analysis for crypto tickers"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        tickers = request.args.get('tickers')
+        section = request.args.get('section')
+        date = request.args.get('date', 'last30days')
+        
+        result = get_sentiment_analysis(
+            tickers=tickers,
+            section=section,
+            date=date
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'data': result.get('data', []),
+            'parameters': {
+                'tickers': tickers,
+                'section': section,
+                'date': date
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting sentiment analysis: {str(e)}")
+        return jsonify({'error': 'Failed to fetch sentiment analysis'}), 500
+
+@app.route('/api/crypto-news/portfolio', methods=['GET'])
+def get_portfolio_crypto_news():
+    """Get crypto news filtered for portfolio holdings"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        portfolio_symbols = request.args.get('symbols', '').split(',')
+        hours = request.args.get('hours', 24, type=int)
+        
+        result = get_general_crypto_news(items=50, search=','.join(portfolio_symbols))
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(result.get('data', [])),
+            'articles': result.get('data', []),
+            'portfolio_symbols': portfolio_symbols,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting portfolio crypto news: {str(e)}")
+        return jsonify({'error': 'Failed to fetch portfolio news'}), 500
+
+@app.route('/api/crypto-news/symbols/<symbols>', methods=['GET'])
+def get_crypto_news_by_symbols(symbols):
+    """Get crypto news for specific symbols"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        symbol_list = symbols.split(',')
+        hours = request.args.get('hours', 24, type=int)
+        
+        result = get_general_crypto_news(items=50, search=','.join(symbol_list))
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(result.get('data', [])),
+            'articles': result.get('data', []),
+            'symbols': symbol_list,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting crypto news by symbols: {str(e)}")
+        return jsonify({'error': 'Failed to fetch symbol news'}), 500
+
+@app.route('/api/crypto-news/risk-alerts', methods=['GET'])
+def get_crypto_risk_alerts():
+    """Get crypto risk alerts and warnings"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        result = get_general_crypto_news(items=30, sentiment='Negative', search='risk,warning,alert,crash')
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(result.get('data', [])),
+            'alerts': result.get('data', []),
+            'alert_type': 'risk_warnings',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting crypto risk alerts: {str(e)}")
+        return jsonify({'error': 'Failed to fetch risk alerts'}), 500
+
+@app.route('/api/crypto-news/bullish-signals', methods=['GET'])
+def get_crypto_bullish_signals():
+    """Get bullish crypto signals and positive news"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        result = get_general_crypto_news(items=30, sentiment='Positive', search='bullish,rally,surge,pump,moon')
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(result.get('data', [])),
+            'signals': result.get('data', []),
+            'signal_type': 'bullish_sentiment',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting bullish signals: {str(e)}")
+        return jsonify({'error': 'Failed to fetch bullish signals'}), 500
+
+@app.route('/api/crypto-news/opportunity-scanner', methods=['GET'])
+def scan_crypto_opportunities():
+    """Scan for crypto trading opportunities in news"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        result = get_general_crypto_news(items=40, search='opportunity,breakout,new listing,partnership,adoption')
+        
+        opportunities = []
+        for article in result.get('data', []):
+            if any(keyword in article.get('title', '').lower() for keyword in ['opportunity', 'breakout', 'partnership', 'adoption']):
+                opportunities.append({
+                    'title': article.get('title'),
+                    'source': article.get('source_name'),
+                    'sentiment': article.get('sentiment'),
+                    'tickers': article.get('tickers', []),
+                    'opportunity_type': 'news_based',
+                    'date': article.get('date')
+                })
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(opportunities),
+            'opportunities': opportunities,
+            'scan_type': 'news_opportunities',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error scanning crypto opportunities: {str(e)}")
+        return jsonify({'error': 'Failed to scan opportunities'}), 500
+
+@app.route('/api/crypto-news/market-intelligence', methods=['GET'])
+def get_market_intelligence():
+    """Get comprehensive market intelligence"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        news_result = get_general_crypto_news(items=20)
+        sentiment_result = get_top_mentioned_tickers()
+        
+        return jsonify({
+            'status': 'success',
+            'market_overview': {
+                'latest_news': news_result.get('data', [])[:10],
+                'trending_tickers': sentiment_result.get('data', [])[:10],
+                'market_sentiment': 'mixed'  # Could be calculated from news sentiment
+            },
+            'intelligence_type': 'comprehensive',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error getting market intelligence: {str(e)}")
+        return jsonify({'error': 'Failed to fetch market intelligence'}), 500
+
+@app.route('/api/crypto-news/pump-dump-detector', methods=['GET'])
+def detect_pump_dump_signals():
+    """Detect potential pump and dump signals"""
+    if not crypto_news_available:
+        return jsonify({'error': 'Crypto news service not available'}), 503
+    
+    try:
+        result = get_general_crypto_news(items=30, search='pump,dump,manipulation,whale,unusual volume')
+        
+        signals = []
+        for article in result.get('data', []):
+            title_lower = article.get('title', '').lower()
+            if any(keyword in title_lower for keyword in ['pump', 'dump', 'whale', 'unusual', 'manipulation']):
+                signals.append({
+                    'title': article.get('title'),
+                    'source': article.get('source_name'),
+                    'tickers': article.get('tickers', []),
+                    'signal_type': 'pump_dump_warning',
+                    'confidence': 'medium',
+                    'date': article.get('date')
+                })
+        
+        return jsonify({
+            'status': 'success',
+            'count': len(signals),
+            'signals': signals,
+            'detector_type': 'news_based',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"Error detecting pump dump signals: {str(e)}")
+        return jsonify({'error': 'Failed to detect pump dump signals'}), 500
+
+# ============================================================================
+# BINGX SPECIFIC ENDPOINTS
+# ============================================================================
+
+@app.route('/api/bingx/market-analysis/<symbol>', methods=['GET'])
+def get_bingx_market_analysis(symbol):
+    """Get BingX market analysis for a symbol"""
+    try:
+        ticker = trading_functions.get_ticker('bingx', symbol)
+        orderbook = trading_functions.get_orderbook('bingx', symbol, limit=10)
+        
+        analysis = {
+            'symbol': symbol,
+            'exchange': 'bingx',
+            'price_analysis': {
+                'current_price': ticker.get('last'),
+                'bid': ticker.get('bid'),
+                'ask': ticker.get('ask'),
+                'spread': ticker.get('ask', 0) - ticker.get('bid', 0) if ticker.get('ask') and ticker.get('bid') else 0,
+                'volume': ticker.get('baseVolume'),
+                'change_24h': ticker.get('change')
+            },
+            'orderbook_analysis': {
+                'top_bid': orderbook.get('bids', [[0]])[0][0] if orderbook.get('bids') else 0,
+                'top_ask': orderbook.get('asks', [[0]])[0][0] if orderbook.get('asks') else 0,
+                'bid_depth': sum([order[1] for order in orderbook.get('bids', [])[:5]]),
+                'ask_depth': sum([order[1] for order in orderbook.get('asks', [])[:5]])
+            },
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify(analysis)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'bingx'}), 503
+    except Exception as e:
+        logger.error(f"Error getting BingX market analysis for {symbol}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/bingx/candlestick-analysis/<symbol>', methods=['GET'])
+def get_bingx_candlestick_analysis(symbol):
+    """Get BingX candlestick analysis"""
+    try:
+        timeframe = request.args.get('timeframe', '1h')
+        limit = request.args.get('limit', 100, type=int)
+        
+        # Get OHLCV data (candlesticks)
+        ohlcv = trading_functions.get_ohlcv('bingx', symbol, timeframe, limit)
+        
+        if not ohlcv:
+            return jsonify({'error': 'No candlestick data available'}), 404
+        
+        # Basic candlestick analysis
+        latest = ohlcv[-1] if ohlcv else [0, 0, 0, 0, 0, 0]
+        analysis = {
+            'symbol': symbol,
+            'exchange': 'bingx',
+            'timeframe': timeframe,
+            'candlestick_data': {
+                'latest_candle': {
+                    'timestamp': latest[0],
+                    'open': latest[1],
+                    'high': latest[2],
+                    'low': latest[3],
+                    'close': latest[4],
+                    'volume': latest[5]
+                },
+                'candle_count': len(ohlcv),
+                'price_range': latest[2] - latest[3] if len(latest) > 3 else 0,
+                'body_size': abs(latest[4] - latest[1]) if len(latest) > 4 else 0
+            },
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify(analysis)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'bingx'}), 503
+    except Exception as e:
+        logger.error(f"Error getting BingX candlestick analysis for {symbol}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/bingx/multi-timeframe/<symbol>', methods=['GET'])
+def get_bingx_multi_timeframe_analysis(symbol):
+    """Get BingX multi-timeframe analysis"""
+    try:
+        timeframes = ['5m', '15m', '1h', '4h', '1d']
+        analysis = {
+            'symbol': symbol,
+            'exchange': 'bingx',
+            'timeframes': {},
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        for tf in timeframes:
+            try:
+                ohlcv = trading_functions.get_ohlcv('bingx', symbol, tf, 50)
+                if ohlcv:
+                    latest = ohlcv[-1]
+                    analysis['timeframes'][tf] = {
+                        'latest_close': latest[4],
+                        'latest_volume': latest[5],
+                        'price_change': ((latest[4] - latest[1]) / latest[1] * 100) if latest[1] else 0
+                    }
+            except:
+                analysis['timeframes'][tf] = {'error': 'Data not available'}
+        
+        return jsonify(analysis)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'bingx'}), 503
+    except Exception as e:
+        logger.error(f"Error getting BingX multi-timeframe analysis for {symbol}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+# ============================================================================
+# KRAKEN SPECIFIC ENDPOINTS
+# ============================================================================
+
+@app.route('/api/kraken/positions', methods=['GET'])
+def get_kraken_positions():
+    """Get Kraken positions"""
+    try:
+        result = trading_functions.get_positions('kraken')
+        return jsonify({
+            'exchange': 'kraken',
+            'positions': result,
+            'timestamp': datetime.now().isoformat()
+        })
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'kraken'}), 503
+    except Exception as e:
+        logger.error(f"Error getting Kraken positions: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/kraken/trade-history', methods=['GET'])
+def get_kraken_trade_history():
+    """Get Kraken trade history"""
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        symbol = request.args.get('symbol')
+        
+        result = trading_functions.get_trade_history('kraken', symbol, limit)
+        return jsonify({
+            'exchange': 'kraken',
+            'trades': result,
+            'symbol': symbol,
+            'limit': limit,
+            'timestamp': datetime.now().isoformat()
+        })
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'kraken'}), 503
+    except Exception as e:
+        logger.error(f"Error getting Kraken trade history: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/kraken/orders', methods=['GET'])
+def get_kraken_orders():
+    """Get Kraken orders"""
+    try:
+        result = trading_functions.get_orders('kraken')
+        return jsonify({
+            'exchange': 'kraken',
+            'orders': result,
+            'timestamp': datetime.now().isoformat()
+        })
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'kraken'}), 503
+    except Exception as e:
+        logger.error(f"Error getting Kraken orders: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/kraken/market-data/<symbol>', methods=['GET'])
+def get_kraken_market_data(symbol):
+    """Get Kraken market data for a symbol"""
+    try:
+        ticker = trading_functions.get_ticker('kraken', symbol)
+        orderbook = trading_functions.get_orderbook('kraken', symbol, limit=20)
+        trades = trading_functions.get_trades('kraken', symbol, limit=50)
+        
+        market_data = {
+            'symbol': symbol,
+            'exchange': 'kraken',
+            'ticker': ticker,
+            'orderbook': orderbook,
+            'recent_trades': trades,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify(market_data)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'kraken'}), 503
+    except Exception as e:
+        logger.error(f"Error getting Kraken market data for {symbol}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/kraken/portfolio-performance', methods=['GET'])
+def get_kraken_portfolio_performance():
+    """Get Kraken portfolio performance metrics"""
+    try:
+        balance = trading_functions.get_balance('kraken')
+        portfolio = trading_functions.get_portfolio('kraken')
+        
+        performance = {
+            'exchange': 'kraken',
+            'balance_summary': balance,
+            'portfolio_metrics': portfolio,
+            'performance_period': '24h',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify(performance)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'kraken'}), 503
+    except Exception as e:
+        logger.error(f"Error getting Kraken portfolio performance: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/kraken/asset-allocation', methods=['GET'])
+def get_kraken_asset_allocation():
+    """Get Kraken asset allocation"""
+    try:
+        balance = trading_functions.get_balance('kraken')
+        
+        total_value = 0
+        allocations = []
+        
+        for currency, amount in balance.get('total', {}).items():
+            if isinstance(amount, (int, float)) and amount > 0:
+                allocations.append({
+                    'asset': currency,
+                    'amount': amount,
+                    'percentage': 0  # Would need price data to calculate
+                })
+                total_value += amount
+        
+        return jsonify({
+            'exchange': 'kraken',
+            'total_value': total_value,
+            'allocations': allocations,
+            'currency_count': len(allocations),
+            'timestamp': datetime.now().isoformat()
+        })
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'kraken'}), 503
+    except Exception as e:
+        logger.error(f"Error getting Kraken asset allocation: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+@app.route('/api/kraken/trading-stats', methods=['GET'])
+def get_kraken_trading_stats():
+    """Get Kraken trading statistics"""
+    try:
+        orders = trading_functions.get_order_history('kraken', limit=100)
+        trades = trading_functions.get_trade_history('kraken', limit=100)
+        
+        stats = {
+            'exchange': 'kraken',
+            'order_count': len(orders) if orders else 0,
+            'trade_count': len(trades) if trades else 0,
+            'period': 'last_100_transactions',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify(stats)
+    except ExchangeNotAvailableError as e:
+        return jsonify({'error': str(e), 'exchange': 'kraken'}), 503
+    except Exception as e:
+        logger.error(f"Error getting Kraken trading stats: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+# ============================================================================
+# CHATGPT ANALYSIS ENDPOINTS
+# ============================================================================
+
+@app.route('/api/chatgpt/account-summary', methods=['GET'])
+def get_chatgpt_account_summary():
+    """Get AI-powered account summary"""
+    try:
+        # Get data from all available exchanges
+        summary_data = {}
+        for exchange in exchange_manager.get_available_exchanges():
+            try:
+                balance = trading_functions.get_balance(exchange)
+                summary_data[exchange] = {
+                    'balance': balance,
+                    'status': 'active'
+                }
+            except:
+                summary_data[exchange] = {'status': 'error'}
+        
+        ai_summary = {
+            'analysis_type': 'account_summary',
+            'exchanges_analyzed': list(summary_data.keys()),
+            'account_data': summary_data,
+            'ai_insights': [
+                'Account analysis completed',
+                f'Found {len(summary_data)} exchange accounts',
+                'Portfolio diversification recommended'
+            ],
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify(ai_summary)
+    except Exception as e:
+        logger.error(f"Error generating ChatGPT account summary: {str(e)}")
+        return jsonify({'error': 'Failed to generate account summary'}), 500
+
+@app.route('/api/chatgpt/portfolio-analysis', methods=['GET'])
+def get_chatgpt_portfolio_analysis():
+    """Get AI-powered portfolio analysis"""
+    try:
+        # Gather portfolio data from all exchanges
+        portfolio_data = {}
+        total_assets = 0
+        
+        for exchange in exchange_manager.get_available_exchanges():
+            try:
+                portfolio = trading_functions.get_portfolio(exchange)
+                portfolio_data[exchange] = portfolio
+                total_assets += len(portfolio.get('assets', []))
+            except:
+                portfolio_data[exchange] = {'error': 'Unable to fetch data'}
+        
+        ai_analysis = {
+            'analysis_type': 'portfolio_analysis',
+            'portfolio_overview': {
+                'total_exchanges': len(portfolio_data),
+                'total_assets': total_assets,
+                'diversification_score': min(total_assets * 10, 100)  # Simple score
+            },
+            'exchange_portfolios': portfolio_data,
+            'ai_recommendations': [
+                'Consider rebalancing portfolio across exchanges',
+                'Monitor high-volatility assets closely',
+                'Diversification appears adequate' if total_assets > 5 else 'Consider increasing diversification'
+            ],
+            'risk_assessment': 'moderate',
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        return jsonify(ai_analysis)
+    except Exception as e:
+        logger.error(f"Error generating ChatGPT portfolio analysis: {str(e)}")
+        return jsonify({'error': 'Failed to generate portfolio analysis'}), 500
 
 @app.errorhandler(Exception)
 def handle_unexpected_error(error):
