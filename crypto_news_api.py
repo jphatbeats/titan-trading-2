@@ -28,29 +28,39 @@ class CryptoNewsAPI:
             return {'error': str(e), 'data': []}
     
     def get_breaking_news(self, limit: int = 10, sentiment: str = None, 
-                         date_filter: str = "last2hours") -> Dict[str, Any]:
+                         date_filter: str = "last60min") -> Dict[str, Any]:
         """Get breaking crypto news with filtering"""
         params = {
+            'section': 'general',
             'items': min(limit, 50),
             'sortby': 'rank',
-            'date': date_filter,
-            'source': 'Coindesk,CryptoSlate,The+Block,Decrypt'  # Tier 1 sources
+            'source': 'Coindesk,CryptoSlate,The+Block,Decrypt'  # Tier 1 sources from docs
         }
         
+        # Only add date filter if it's one of the valid options from docs
+        valid_dates = ['last5min', 'last10min', 'last15min', 'last30min', 'last45min', 
+                      'last60min', 'today', 'yesterday', 'last7days', 'last30days']
+        if date_filter in valid_dates:
+            params['date'] = date_filter
+            
         if sentiment:
             params['sentiment'] = sentiment.lower()
             
-        return self._make_request('', params)
+        return self._make_request('/category', params)
     
     def get_portfolio_news(self, tickers: List[str], limit: int = 15) -> Dict[str, Any]:
-        """Get news specific to user's portfolio holdings"""
+        """Get news specific to user's portfolio holdings using search workaround"""
         if not tickers:
             return {'data': [], 'message': 'No tickers provided'}
-            
+        
+        # WORKAROUND: API requires tickers parameter but search parameter actually works
+        # Use BTC as dummy ticker + search for actual symbols
+        search_terms = ','.join(tickers)
         params = {
-            'tickers': ','.join(tickers),
+            'tickers': 'BTC',  # Required by API (dummy value)
+            'search': search_terms,  # Actual search that finds results
             'items': min(limit, 50),
-            'date': 'last24hours',
+            'date': 'today',
             'sortby': 'rank'
         }
         
@@ -58,66 +68,94 @@ class CryptoNewsAPI:
     
     def get_news_by_symbols(self, symbols: List[str], limit: int = 10, 
                            mode: str = "broad") -> Dict[str, Any]:
-        """Get news by specific symbols with different ticker modes"""
+        """Get news by specific symbols using tickers+search workaround"""
         if not symbols:
             return {'data': [], 'message': 'No symbols provided'}
             
-        params = {'items': min(limit, 50)}
+        params = {
+            'items': min(limit, 50),
+            'tickers': 'BTC'  # Required dummy parameter
+        }
         
-        # Three ticker modes from your strategy doc
+        # WORKAROUND: Use search parameter for actual results
         if mode == "broad":
-            params['tickers'] = ','.join(symbols)  # Broad net
+            params['search'] = ','.join(symbols)  # Search for any symbol
         elif mode == "intersection":
-            params['tickers-include'] = ','.join(symbols)  # Must mention all
+            params['search'] = ' AND '.join(symbols)  # All symbols required
         elif mode == "laser":
-            params['tickers-only'] = symbols[0] if symbols else 'BTC'  # Only one ticker
+            params['search'] = symbols[0] if symbols else 'BTC'  # Single symbol
             
         return self._make_request('', params)
     
     def get_risk_alerts(self, limit: int = 20, severity: str = "high") -> Dict[str, Any]:
         """Get risk-related crypto news and alerts"""
-        risk_keywords = "hack,exploit,rug,delisting,SEC,regulation,lawsuit,scam,vulnerability"
-        
         params = {
+            'section': 'general',
             'items': min(limit, 50),
             'sentiment': 'negative',
-            'search': risk_keywords,
-            'date': 'last24hours',
+            'search': 'hack,exploit,rug+pull,delisting,SEC,regulation,lawsuit,scam,vulnerability',
+            'date': 'today',  # Use valid date from docs
             'sortby': 'rank',
             'source': 'Coindesk,CryptoSlate,The+Block,Decrypt,Forbes'
         }
         
-        return self._make_request('', params)
+        return self._make_request('/category', params)
     
-    def get_bullish_signals(self, limit: int = 15, timeframe: str = "last6hours") -> Dict[str, Any]:
+    def get_bullish_signals(self, limit: int = 15, timeframe: str = "today") -> Dict[str, Any]:
         """Get bullish sentiment and positive catalyst news"""
-        bullish_keywords = "partnership,listing,binance,coinbase,institutional,adoption,breakthrough"
-        
         params = {
+            'section': 'general',
             'items': min(limit, 50),
             'sentiment': 'positive',
-            'search': bullish_keywords,
-            'date': timeframe,
+            'search': 'partnership,listing,binance,coinbase,institutional,adoption,breakthrough',
             'sortby': 'rank',
             'source': 'Coindesk,CryptoSlate,The+Block,Decrypt'
         }
         
-        return self._make_request('', params)
+        # Only add valid date filters
+        valid_dates = ['last5min', 'last10min', 'last15min', 'last30min', 'last45min', 
+                      'last60min', 'today', 'yesterday', 'last7days', 'last30days']
+        if timeframe in valid_dates:
+            params['date'] = timeframe
+            
+        return self._make_request('/category', params)
     
     def scan_opportunities(self, sectors: List[str] = None, limit: int = 25) -> Dict[str, Any]:
-        """Scan for trading opportunities across sectors"""
+        """Scan for trading opportunities across sectors using predefined topics"""
         if not sectors:
-            sectors = ['AI', 'DeFi', 'Gaming', 'RWA', 'Layer2']
+            # Use actual topic parameters from API docs
+            sectors = ['NFT', 'Mining', 'pricemovement', 'Institutions', 'Upgrade']
             
         params = {
             'section': 'alltickers',
             'items': min(limit, 50),
             'sentiment': 'positive',
-            'topicOR': ','.join(sectors),
-            'date': 'last12hours',
+            'topicOR': ','.join(sectors),  # Topics use comma separation
+            'date': 'today',
             'sortby': 'rank'
         }
         
+        return self._make_request('/category', params)
+    
+    def get_by_topic(self, topics: List[str], limit: int = 20, 
+                     logic: str = "OR") -> Dict[str, Any]:
+        """Get news by specific topics using AND or OR logic"""
+        if not topics:
+            return {'data': [], 'message': 'No topics provided'}
+            
+        params = {
+            'section': 'general',
+            'items': min(limit, 50),
+            'sortby': 'rank',
+            'date': 'today'
+        }
+        
+        # Use topicOR or topic based on logic preference
+        if logic.upper() == "OR":
+            params['topicOR'] = ','.join(topics)
+        else:
+            params['topic'] = ','.join(topics)  # AND logic
+            
         return self._make_request('/category', params)
     
     def get_market_intelligence(self, comprehensive: bool = True) -> Dict[str, Any]:
@@ -134,16 +172,15 @@ class CryptoNewsAPI:
     
     def detect_pump_dump_signals(self, limit: int = 20) -> Dict[str, Any]:
         """Detect potential pump and dump patterns in news"""
-        pump_dump_keywords = "pump,dump,manipulation,whale,unusual+volume,massive+buy,coordinated"
-        
         params = {
+            'section': 'general',
             'items': min(limit, 50),
-            'search': pump_dump_keywords,
-            'date': 'last6hours',
+            'search': 'pump,dump,manipulation,whale,unusual+volume,massive+buy,coordinated',
+            'date': 'today',  # Use valid date from docs
             'sortby': 'rank'
         }
         
-        return self._make_request('', params)
+        return self._make_request('/category', params)
     
     def get_ultra_fresh_news(self, minutes: int = 5) -> Dict[str, Any]:
         """Get ultra-fresh news for immediate opportunities"""
