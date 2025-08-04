@@ -421,7 +421,7 @@ class TradingIntelligence:
             {json.dumps(viral_plays, indent=2)}
 
             DEXSCREENER TRENDING (New/Small cap tokens):
-            {json.dumps(dex_trending, indent=2)}
+            {json.dumps(str(dex_trending)[:2000], indent=2)}
 
             SOCIAL TRENDING (Exclude major coins):
             {json.dumps(trending_social, indent=2)}
@@ -448,10 +448,14 @@ class TradingIntelligence:
             8. degen_score: Always 9-10 for new/micro tokens
 
             **REQUIREMENTS**:
-            - If no small/new tokens found, say "No degen opportunities detected today"
-            - Never recommend established coins (>$1B market cap)
+            - Extract actual token symbols from descriptions and URLs (not just "Unknown")
+            - For viral_opportunities, provide proper token names like LARP, OCEAN, YOU etc from descriptions
+            - Look for token symbols in descriptions and extract meaningful names
+            - If no symbol found, use keywords from description or token address prefix
+            - Always provide some analysis even with limited data
+            - Never recommend established coins (>$1B market cap)  
             - Focus on tokens trading on DEXs, not major exchanges
-            - Look for community-driven tokens, not VC-backed projects
+            - Provide general degen trading tips when specific opportunities are limited
             """
             
             response = self.client.chat.completions.create(
