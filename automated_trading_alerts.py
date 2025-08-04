@@ -110,29 +110,42 @@ def find_latest_positions_csv():
 
 
 async def fetch_live_positions():
-    """Fetch live positions directly from Railway API"""
+    """Fetch live positions directly from Railway API - LIVE DATA ONLY (No CSV fallback)"""
     try:
         print("📡 Fetching live positions from Railway API...")
         
         all_positions = []
         
-        # Fetch BingX positions
+        # Fetch BingX positions with proper error handling
         try:
             bingx_data = await fetch_railway_api("/api/live/bingx-positions")
-            if bingx_data and bingx_data.get('positions'):
-                for pos in bingx_data['positions']:
-                    all_positions.append({
-                        'Symbol': pos.get('symbol', ''),
-                        'Platform': 'BingX',
-                        'Entry Price': pos.get('avgPrice', 0),
-                        'Mark Price': pos.get('markPrice', 0),
-                        'Unrealized PnL %': pos.get('unrealizedPnl_percent', 0),
-                        'Side (LONG/SHORT)': pos.get('side', ''),
-                        'Margin Size ($)': pos.get('initialMargin', 0),
-                        'Leverage': pos.get('leverage', 1),
-                        'SL Set?': '❌'  # Default, would need additional API call to check
-                    })
-                print(f"✅ Fetched {len(bingx_data['positions'])} BingX positions")
+            
+            # Handle string response (parsing error fix)
+            if isinstance(bingx_data, str):
+                print("⚠️ BingX returned string, attempting JSON parse...")
+                import json
+                try:
+                    bingx_data = json.loads(bingx_data)
+                except:
+                    print("❌ Failed to parse BingX string response as JSON")
+                    bingx_data = None
+            
+            if bingx_data and isinstance(bingx_data, dict):
+                positions = bingx_data.get('positions') or bingx_data.get('data') or []
+                for pos in positions:
+                    if isinstance(pos, dict):  # Ensure it's a dict, not string
+                        all_positions.append({
+                            'Symbol': pos.get('symbol', ''),
+                            'Platform': 'BingX',
+                            'Entry Price': float(pos.get('avgPrice', 0)),
+                            'Mark Price': float(pos.get('markPrice', 0)),
+                            'Unrealized PnL %': float(pos.get('unrealizedPnl_percent', 0)),
+                            'Side (LONG/SHORT)': pos.get('side', ''),
+                            'Margin Size ($)': float(pos.get('initialMargin', 0)),
+                            'Leverage': float(pos.get('leverage', 1)),
+                            'SL Set?': '❌'
+                        })
+                print(f"✅ Fetched {len(positions)} BingX positions")
         except Exception as e:
             print(f"⚠️ BingX positions error: {e}")
         
@@ -231,86 +244,143 @@ def analyze_trading_conditions(positions):
 
             print(f"📊 {symbol}: PnL {pnl_pct:.1f}%, RSI {rsi:.1f}")
 
-            # Condition 1: RSI Overbought (RSI > 72) - Optimized threshold
+            # Enhanced RSI Overbought Analysis with specific trading suggestions
             if rsi > 72:
+                # Determine overbought severity and strategy
+                if rsi > 85:
+                    strategy = "🔴 EXTREME: Take profits immediately. High probability of sharp reversal."
+                    action = "Exit 75% of position, trail stop on remainder"
+                elif rsi > 78:
+                    strategy = "🟠 STRONG: Begin profit-taking. Set tight trailing stops."
+                    action = "Exit 50% position, move stop to break-even"
+                else:
+                    strategy = "🟡 MODERATE: Monitor closely. Prepare for potential pullback."
+                    action = "Tighten stops, consider partial profit-taking"
+                
                 alerts.append({
-                    'type':
-                    'overbought',
-                    'symbol':
-                    symbol,
-                    'platform':
-                    platform,
-                    'rsi':
-                    round(rsi, 1),
-                    'pnl':
-                    pnl_pct,
-                    'message':
-                    f"🟥 Alert! ${symbol} RSI is {rsi:.1f}. Consider exiting or trailing stop."
+                    'type': 'overbought',
+                    'symbol': symbol,
+                    'platform': platform,
+                    'rsi': round(rsi, 1),
+                    'pnl': pnl_pct,
+                    'message': f"🟥 **${symbol} Overbought Alert** (RSI: {rsi:.1f})\n" +
+                              f"📈 Current PnL: **{pnl_pct:+.1f}%** | Size: ${margin_size:.0f}\n" +
+                              f"🧠 **Analysis**: {strategy}\n" +
+                              f"⚡ **Action**: {action}"
                 })
 
-            # Condition 2: RSI Oversold (RSI < 28) - Optimized threshold
+            # Enhanced RSI Oversold Analysis with entry strategies
             elif rsi < 28:
+                # Determine oversold opportunity and entry strategy
+                if rsi < 15:
+                    strategy = "🟢 EXTREME OVERSOLD: High probability bounce setup. Prime entry zone."
+                    action = "Consider adding position with tight stop. Target 10-20% bounce."
+                elif rsi < 22:
+                    strategy = "🟢 STRONG OVERSOLD: Good reversal potential if volume confirms."
+                    action = "Watch for volume spike, enter on first green candle"
+                else:
+                    strategy = "🟡 MODERATE OVERSOLD: Potential support level. Wait for confirmation."
+                    action = "Monitor for bullish divergence or support hold"
+                
                 alerts.append({
-                    'type':
-                    'oversold',
-                    'symbol':
-                    symbol,
-                    'platform':
-                    platform,
-                    'rsi':
-                    round(rsi, 1),
-                    'pnl':
-                    pnl_pct,
-                    'message':
-                    f"🟩 ${symbol} is oversold at RSI {rsi:.1f}. Clean reversal setup detected."
+                    'type': 'oversold',
+                    'symbol': symbol,
+                    'platform': platform,
+                    'rsi': round(rsi, 1),
+                    'pnl': pnl_pct,
+                    'message': f"🟩 **${symbol} Oversold Opportunity** (RSI: {rsi:.1f})\n" +
+                              f"📉 Current PnL: **{pnl_pct:+.1f}%** | Entry: ${entry_price:.6f}\n" +
+                              f"🧠 **Analysis**: {strategy}\n" +
+                              f"⚡ **Strategy**: {action}"
                 })
 
-            # Condition 3: Unrealized PnL < -8% (Losing trade) - More sensitive threshold
+            # Condition 3: Unrealized PnL < -8% (Losing trade) - Enhanced with detailed analysis
             if pnl_pct < -8:
+                # Calculate suggested actions based on loss severity
+                loss_severity = "MODERATE" if pnl_pct > -15 else "SEVERE" if pnl_pct > -25 else "CRITICAL"
+                
+                if loss_severity == "CRITICAL":
+                    suggestion = f"🚨 IMMEDIATE ACTION: Consider cutting loss at -25% max. Risk/reward heavily skewed."
+                elif loss_severity == "SEVERE":
+                    suggestion = f"⚠️ URGENT: Set tight stop at current level. Monitor for bounce or cut at -20%."
+                else:
+                    suggestion = f"📊 ANALYSIS: Set stop at -12%. If strong support here, consider adding small position."
+                
+                # Add position size context
+                size_context = ""
+                if margin_size > 500:
+                    size_context = f" Large position (${margin_size:.0f}) - prioritize capital preservation."
+                elif margin_size < 100:
+                    size_context = f" Small position (${margin_size:.0f}) - could hold for reversal."
+                
                 alerts.append({
-                    'type':
-                    'losing_trade',
-                    'symbol':
-                    symbol,
-                    'platform':
-                    platform,
-                    'pnl':
-                    pnl_pct,
-                    'margin':
-                    margin_size,
-                    'message':
-                    f"🚨 ${symbol} is down {pnl_pct:.1f}%. Capital preservation - review position."
+                    'type': 'losing_trade',
+                    'symbol': symbol,
+                    'platform': platform,
+                    'pnl': pnl_pct,
+                    'margin': margin_size,
+                    'severity': loss_severity,
+                    'message': f"🚨 **${symbol} Loss Analysis** (${margin_size:.0f})\n" +
+                              f"📉 Down **{pnl_pct:.1f}%** | Severity: **{loss_severity}**\n" +
+                              f"💡 **Strategy**: {suggestion}{size_context}\n" +
+                              f"🎯 **Entry**: ${entry_price:.6f} | **Current**: ${mark_price:.6f}"
                 })
 
-            # Additional Condition: Large position without stop loss (>$150)
+            # Enhanced stop loss alerts with position management advice
             sl_set = position.get('SL Set?', '❌')
             if margin_size > 150 and sl_set == '❌':
+                # Calculate suggested stop loss based on current PnL
+                if pnl_pct > 0:
+                    sl_suggestion = f"Set trailing stop at break-even or +5% to lock profits"
+                elif pnl_pct > -5:
+                    sl_suggestion = f"Set stop at -8% to limit downside risk"
+                else:
+                    sl_suggestion = f"URGENT: Set stop immediately at -10% max"
+                
+                risk_level = "HIGH" if margin_size > 1000 else "MEDIUM" if margin_size > 500 else "MODERATE"
+                
                 alerts.append({
-                    'type':
-                    'no_stop_loss',
-                    'symbol':
-                    symbol,
-                    'platform':
-                    platform,
-                    'margin':
-                    margin_size,
-                    'message':
-                    f"🛡️ ${symbol} position (${margin_size:.0f}) needs STOP LOSS for fast rotation!"
+                    'type': 'no_stop_loss',
+                    'symbol': symbol,
+                    'platform': platform,
+                    'margin': margin_size,
+                    'risk_level': risk_level,
+                    'message': f"🛡️ **${symbol} Risk Management** (${margin_size:.0f})\n" +
+                              f"⚠️ **No Stop Loss** | Risk Level: **{risk_level}**\n" +
+                              f"💡 **Action**: {sl_suggestion}\n" +
+                              f"📊 Current PnL: **{pnl_pct:+.1f}%** | {side} @ {leverage:.0f}x"
                 })
 
-            # Additional Condition: High profit opportunity (>35%) - Let winners run
+            # Enhanced high profit analysis with profit management strategies
             if pnl_pct > 35:
+                # Determine profit management strategy based on gain size
+                if pnl_pct > 100:
+                    strategy = "🚀 MASSIVE GAINS: Secure majority of profits, let small portion run."
+                    action = "Take 80% profits, trail stop at +75% on remainder"
+                elif pnl_pct > 75:
+                    strategy = "💎 EXCELLENT: Take substantial profits, protect gains with trailing stops."
+                    action = "Take 60% profits, trail stop at +50% on remainder"
+                elif pnl_pct > 50:
+                    strategy = "📈 STRONG: Secure some profits while letting winners run."
+                    action = "Take 40% profits, move stop to +25%"
+                else:
+                    strategy = "✅ GOOD: Protect gains with trailing stops, consider partial profits."
+                    action = "Move stop to break-even, consider 25% profit-taking"
+                
+                # Add position context
+                profit_amount = margin_size * (pnl_pct / 100)
+                
                 alerts.append({
-                    'type':
-                    'high_profit',
-                    'symbol':
-                    symbol,
-                    'platform':
-                    platform,
-                    'pnl':
-                    pnl_pct,
-                    'message':
-                    f"💰 ${symbol} up {pnl_pct:.1f}%! Consider rotating or trailing stops."
+                    'type': 'high_profit',
+                    'symbol': symbol,
+                    'platform': platform,
+                    'pnl': pnl_pct,
+                    'profit_amount': profit_amount,
+                    'message': f"💰 **${symbol} Profit Alert** (+{pnl_pct:.1f}%)\n" +
+                              f"🎯 **Unrealized Profit**: ${profit_amount:.0f} | Position: ${margin_size:.0f}\n" +
+                              f"🧠 **Strategy**: {strategy}\n" +
+                              f"⚡ **Action**: {action}\n" +
+                              f"📊 Entry: ${entry_price:.6f} → Current: ${mark_price:.6f}"
                 })
 
         except Exception as e:
@@ -445,6 +515,30 @@ async def fetch_railway_api(endpoint):
                     return None
     except Exception as e:
         print(f"❌ Railway API fetch error: {e}")
+        return None
+
+async def fetch_lunarcrush_data():
+    """Fetch LunarCrush social sentiment and trending data"""
+    try:
+        # Try to get LunarCrush data from Railway API endpoint
+        lunarcrush_data = await fetch_railway_api("/api/lunarcrush/trending")
+        if lunarcrush_data:
+            print("✅ LunarCrush data fetched successfully")
+            return {
+                'trending_coins': lunarcrush_data.get('data', [])[:10],  # Top 10 trending
+                'social_sentiment': lunarcrush_data.get('sentiment', {}),
+                'data_source': 'lunarcrush_api'
+            }
+        else:
+            # Fallback: basic social metrics simulation for now
+            print("⚠️ LunarCrush API unavailable, using fallback social metrics")
+            return {
+                'trending_coins': ['BTC', 'ETH', 'SOL', 'ADA', 'MATIC'],
+                'social_sentiment': {'status': 'api_unavailable'},
+                'data_source': 'fallback'
+            }
+    except Exception as e:
+        print(f"❌ LunarCrush fetch error: {e}")
         return None
 
 async def send_discord_alert(message, channel='portfolio'):
@@ -773,32 +867,52 @@ async def run_alpha_analysis():
         # Get comprehensive market intelligence using direct CryptoNews API
         from crypto_news_alerts import get_general_crypto_news, get_top_mentioned_tickers
         
-        # Get opportunities (positive sentiment news)
-        opportunities_data = get_general_crypto_news(items=10, sentiment='positive')
+        # Get RECENT opportunities (positive sentiment news - LAST 24 HOURS ONLY)
+        from datetime import datetime, timedelta
+        yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        opportunities_data = get_general_crypto_news(items=15, sentiment='positive', date=today)
         opportunities = {'opportunities': opportunities_data.get('data', [])} if opportunities_data else None
         
-        # Get bullish signals (top mentioned tickers with positive sentiment)
-        bullish_data = get_top_mentioned_tickers(date="last7days")
+        # Get bullish signals (RECENT tickers only - last 3 days max)
+        bullish_data = get_top_mentioned_tickers(date="last3days")  
         bullish_signals = {'signals': bullish_data.get('data', [])} if bullish_data else None
         
-        # Get market intelligence (general trending news)
-        market_data = get_general_crypto_news(items=5, sentiment=None)
+        # Get ALL NEWS SOURCES (not just tier 1) - let GPT filter quality vs garbage
+        market_data = get_general_crypto_news(items=25, sentiment=None, date=today)  # All sources, GPT filters
         market_intelligence = {'intelligence': market_data.get('data', [])} if market_data else None
         
-        # Get AI opportunity analysis if available
-        ai_opportunities = None
-        if openai_available and (opportunities or market_intelligence):
+        # Add LunarCrush social sentiment data for better alpha detection
+        lunarcrush_data = await fetch_lunarcrush_data()
+        if lunarcrush_data:
+            if market_intelligence:
+                market_intelligence['lunarcrush'] = lunarcrush_data
+            else:
+                market_intelligence = {'lunarcrush': lunarcrush_data}
+        
+        # Get comprehensive market data for AI analysis
+        comprehensive_market_data = None
+        if openai_available:
             try:
+                # Fetch real-time market data from Railway API for accurate price analysis
+                import aiohttp
+                railway_market_data = await fetch_railway_api("/api/chatgpt/opportunity-scanner")
+                
                 scan_data = {
                     'opportunities': opportunities,
-                    'market_data': market_intelligence,
+                    'news_intelligence': market_intelligence,
                     'bullish_signals': bullish_signals,
-                    'timestamp': datetime.now().isoformat()
+                    'real_time_market_data': railway_market_data,  # This provides accurate OHLCV + technical data
+                    'timestamp': datetime.now().isoformat(),
+                    'data_sources': ['cryptonews_api', 'exchange_tickers', 'technical_indicators']
                 }
                 ai_opportunities = trading_ai.scan_opportunities(scan_data, market_intelligence or {})
-                print("✅ AI opportunity scan completed")
+                print("✅ AI opportunity scan with real-time market data completed")
             except Exception as ai_e:
                 print(f"⚠️ AI opportunity scan failed: {ai_e}")
+                # Fallback to basic news data only
+                ai_opportunities = None
         
         # Format comprehensive AI-enhanced alpha scan message
         alpha_message = f"🤖 **AI ALPHA SCAN REPORT** 🤖\n"
