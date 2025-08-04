@@ -17,6 +17,15 @@ import asyncio
 import aiohttp
 import requests
 
+# Import crypto news module
+try:
+    from crypto_news_api import CryptoNewsAPI
+    crypto_news_available = True
+    print("✅ Crypto news API module loaded successfully")
+except ImportError as e:
+    crypto_news_available = False
+    print(f"❌ Crypto news API not available: {e}")
+
 # Discord Multi-Channel Configuration
 DISCORD_WEBHOOKS = {
     'alerts': os.getenv('DISCORD_ALERTS_WEBHOOK'),        # Breaking news, risks (1398000506068009032)
@@ -614,8 +623,361 @@ def save_alerts_for_bot(alerts):
         return False
 
 
+async def run_portfolio_analysis():
+    """Hourly portfolio analysis for #portfolio channel"""
+    try:
+        print("\n📊 PORTFOLIO ANALYSIS - Running hourly check...")
+        
+        # Get live position data from Railway API
+        positions = await fetch_live_positions()
+        
+        if not positions:
+            print("⚠️ No positions data available")
+            return
+        
+        positions_df = pd.DataFrame(positions)
+        alerts = []
+        
+        # Traditional trading analysis (RSI, PnL, etc.)
+        rsi_alerts = analyze_trading_conditions(positions)
+        alerts.extend(rsi_alerts)
+        
+        # Get portfolio-specific news using direct CryptoNews API
+        if crypto_news_available:
+            from crypto_news_alerts import get_portfolio_symbols, get_advanced_ticker_news
+            portfolio_symbols = get_portfolio_symbols()
+            if portfolio_symbols:
+                portfolio_news = get_advanced_ticker_news(portfolio_symbols, mode="any", items=10, sentiment=None)
+            else:
+                portfolio_news = None
+        else:
+            portfolio_news = None
+        
+        # Format portfolio message
+        if alerts or (portfolio_news and portfolio_news.get('data')):
+            portfolio_message = f"📊 **PORTFOLIO UPDATE** 📊\n\n"
+            
+            # Add trading signals
+            if alerts:
+                portfolio_message += f"🎯 **TRADING SIGNALS:**\n"
+                for alert in alerts[:3]:
+                    portfolio_message += f"• {alert.get('message', alert.get('type', 'Signal'))}\n"
+                portfolio_message += f"\n"
+            
+            # Add relevant news
+            if portfolio_news and portfolio_news.get('data'):
+                portfolio_message += f"📰 **PORTFOLIO NEWS:**\n"
+                for article in portfolio_news['data'][:2]:
+                    title = article.get('title', 'Market Update')
+                    url = article.get('news_url', article.get('url', ''))
+                    source = article.get('source_name', article.get('source', ''))
+                    tickers = article.get('tickers', [])
+                    
+                    if url:
+                        portfolio_message += f"**[{title}]({url})**\n"
+                    else:
+                        portfolio_message += f"**{title}**\n"
+                    
+                    if source:
+                        portfolio_message += f"📰 {source}"
+                    if tickers:
+                        portfolio_message += f" | 🎯 {', '.join(tickers[:3])}"
+                    portfolio_message += f"\n\n"
+            
+            await send_discord_alert(portfolio_message, 'portfolio')
+            print("✅ Portfolio analysis sent to Discord")
+        else:
+            print("📊 No significant portfolio updates to report")
+            
+    except Exception as e:
+        print(f"❌ Portfolio analysis error: {e}")
+
+async def run_alpha_analysis():
+    """Twice daily comprehensive alpha analysis for #alpha-scans channel"""
+    try:
+        print("\n🎯 ALPHA ANALYSIS - Running comprehensive scan...")
+        
+        if not crypto_news_available:
+            # Fallback message when crypto news module not available
+            alpha_message = f"🎯 **ALPHA SCAN REPORT** 🎯\n"
+            alpha_message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+            alpha_message += f"⚠️ **System Notice**: Crypto news module temporarily unavailable\n"
+            alpha_message += f"📊 Portfolio analysis and basic alerts still running normally\n"
+            alpha_message += f"🔄 Alpha scans will resume once news service is restored\n\n"
+            
+            await send_discord_alert(alpha_message, 'alpha_scans')
+            print("⚠️ Alpha analysis sent fallback message due to unavailable crypto news module")
+            return
+        
+        # Get comprehensive market intelligence using direct CryptoNews API
+        from crypto_news_alerts import get_general_crypto_news, get_top_mentioned_tickers
+        
+        # Get opportunities (positive sentiment news)
+        opportunities_data = get_general_crypto_news(items=10, sentiment='positive')
+        opportunities = {'opportunities': opportunities_data.get('data', [])} if opportunities_data else None
+        
+        # Get bullish signals (top mentioned tickers with positive sentiment)
+        bullish_data = get_top_mentioned_tickers(date="last7days")
+        bullish_signals = {'signals': bullish_data.get('data', [])} if bullish_data else None
+        
+        # Get market intelligence (general trending news)
+        market_data = get_general_crypto_news(items=5, sentiment=None)
+        market_intelligence = {'intelligence': market_data.get('data', [])} if market_data else None
+        
+        alpha_message = f"🎯 **ALPHA SCAN REPORT** 🎯\n"
+        alpha_message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        
+        # Trading opportunities
+        if opportunities and opportunities.get('opportunities'):
+            alpha_message += f"🚀 **TRADING OPPORTUNITIES:**\n"
+            for opp in opportunities['opportunities'][:3]:
+                title = opp.get('title', 'Opportunity detected')
+                url = opp.get('news_url', opp.get('url', ''))
+                tickers = opp.get('tickers', [])
+                source = opp.get('source_name', opp.get('source', ''))
+                sentiment = opp.get('sentiment', '')
+                
+                if url:
+                    alpha_message += f"💰 **[{title}]({url})**\n"
+                else:
+                    alpha_message += f"💰 **{title}**\n"
+                
+                if tickers:
+                    alpha_message += f"🎯 **{', '.join(tickers[:2])}** | "
+                if source:
+                    alpha_message += f"📰 {source} | "
+                if sentiment:
+                    sentiment_emoji = "📈" if sentiment.lower() == "positive" else "📉" if sentiment.lower() == "negative" else "➡️"
+                    alpha_message += f"{sentiment_emoji} {sentiment.title()}"
+                alpha_message += f"\n\n"
+        
+        # Bullish signals for long-term holds
+        if bullish_signals and bullish_signals.get('signals'):
+            alpha_message += f"📈 **LONG-TERM BULLISH SIGNALS:**\n"
+            for signal in bullish_signals['signals'][:2]:
+                title = signal.get('title', 'Bullish signal')
+                url = signal.get('url', signal.get('link', ''))
+                symbol = signal.get('symbol', '')
+                
+                if url:
+                    alpha_message += f"🔥 **[{title}]({url})**\n"
+                else:
+                    alpha_message += f"🔥 **{title}**\n"
+                    
+                if symbol:
+                    alpha_message += f"💎 **{symbol}** - Long-term hold candidate\n\n"
+        
+        # Market intelligence for early entries
+        if market_intelligence and market_intelligence.get('intelligence'):
+            alpha_message += f"🧠 **MARKET INTELLIGENCE:**\n"
+            for intel in market_intelligence['intelligence'][:2]:
+                title = intel.get('title', 'Market insight')
+                url = intel.get('url', intel.get('link', ''))
+                
+                if url:
+                    alpha_message += f"⚡ **[{title}]({url})**\n"
+                else:
+                    alpha_message += f"⚡ **{title}**\n"
+                alpha_message += f"🎯 Early entry opportunity detected\n\n"
+        
+        # Add footer with next scan time
+        next_scan = "09:00 UTC" if datetime.now().hour >= 21 or datetime.now().hour < 9 else "21:00 UTC"
+        alpha_message += f"⏰ Next Alpha Scan: {next_scan}"
+        
+        await send_discord_alert(alpha_message, 'alpha_scans')
+        print("✅ Alpha analysis sent to Discord")
+        
+    except Exception as e:
+        print(f"❌ Alpha analysis error: {e}")
+
+async def send_sundown_digest():
+    """Send daily Sundown Digest to #alerts channel (Mon-Fri 7pm ET)"""
+    try:
+        print("\n🌅 SUNDOWN DIGEST - Getting daily market wrap-up...")
+        
+        if not crypto_news_available:
+            print("❌ Crypto news module not available for Sundown Digest")
+            return
+        
+        # Check if it's a weekday (Monday = 0, Friday = 4)
+        now_et = datetime.now(pytz.timezone('US/Eastern'))
+        if now_et.weekday() > 4:  # Saturday = 5, Sunday = 6
+            print("📅 Skipping Sundown Digest - Weekend (no digest available)")
+            return
+        
+        # Get Sundown Digest from CryptoNews API
+        from crypto_news_api import get_sundown_digest
+        digest_data = get_sundown_digest()
+        
+        if not digest_data or not digest_data.get('data'):
+            print("❌ No Sundown Digest available from CryptoNews API")
+            return
+        
+        # Format the digest for Discord
+        digest_article = digest_data['data'][0] if digest_data.get('data') else None
+        
+        if digest_article:
+            title = digest_article.get('title', 'Daily Market Digest')
+            text = digest_article.get('text', digest_article.get('summary', ''))
+            url = digest_article.get('news_url', digest_article.get('url', ''))
+            source = digest_article.get('source_name', digest_article.get('source', 'CryptoNews'))
+            
+            # Create comprehensive digest message
+            digest_message = f"🌅 **SUNDOWN DIGEST** 🌅\n"
+            digest_message += f"📅 {now_et.strftime('%A, %B %d, %Y')}\n\n"
+            
+            if url:
+                digest_message += f"📰 **[{title}]({url})**\n\n"
+            else:
+                digest_message += f"📰 **{title}**\n\n"
+            
+            # Add summary if available (truncate to keep under Discord limit)
+            if text:
+                summary = text[:800] + "..." if len(text) > 800 else text
+                digest_message += f"{summary}\n\n"
+            
+            digest_message += f"📰 Source: {source}\n"
+            digest_message += f"⏰ Next digest: Tomorrow 7:00 PM ET"
+            
+            await send_discord_alert(digest_message, 'alerts')
+            
+            # Mark as delivered to prevent backup delivery
+            now_et = datetime.now(pytz.timezone('US/Eastern'))
+            today_key = f"digest_{now_et.strftime('%Y-%m-%d')}"
+            digest_delivery_tracker.add(today_key)
+            
+            print("✅ Sundown Digest sent to Discord #alerts channel")
+        else:
+            print("❌ Invalid digest data structure")
+            
+    except Exception as e:
+        print(f"❌ Sundown Digest error: {e}")
+
+# Track digest delivery to prevent duplicates
+digest_delivery_tracker = set()
+
+async def send_sundown_digest_backup():
+    """Backup Sundown Digest delivery at 7:15 PM ET - only sends if main delivery failed"""
+    try:
+        print("\n🌅 SUNDOWN DIGEST BACKUP - Checking if main delivery succeeded...")
+        
+        # Generate unique key for today's digest
+        now_et = datetime.now(pytz.timezone('US/Eastern'))
+        today_key = f"digest_{now_et.strftime('%Y-%m-%d')}"
+        
+        # Check if we already delivered today's digest
+        if today_key in digest_delivery_tracker:
+            print("✅ Main Sundown Digest already delivered today - skipping backup")
+            return
+        
+        print("⚠️ Main Sundown Digest not delivered - sending backup now...")
+        
+        if not crypto_news_available:
+            print("❌ Crypto news module not available for backup digest")
+            return
+        
+        # Skip weekends
+        if now_et.weekday() > 4:
+            print("📅 Skipping backup digest - Weekend")
+            return
+        
+        # Get digest and send
+        from crypto_news_api import get_sundown_digest
+        digest_data = get_sundown_digest()
+        
+        if not digest_data or not digest_data.get('data'):
+            print("❌ No Sundown Digest available from API for backup")
+            return
+        
+        digest_article = digest_data['data'][0] if digest_data.get('data') else None
+        
+        if digest_article:
+            title = digest_article.get('title', 'Daily Market Digest')
+            text = digest_article.get('text', digest_article.get('summary', ''))
+            url = digest_article.get('news_url', digest_article.get('url', ''))
+            source = digest_article.get('source_name', digest_article.get('source', 'CryptoNews'))
+            
+            # Create backup digest message with indicator
+            digest_message = f"🌅 **SUNDOWN DIGEST** (Backup Delivery) 🌅\n"
+            digest_message += f"📅 {now_et.strftime('%A, %B %d, %Y')}\n\n"
+            
+            if url:
+                digest_message += f"📰 **[{title}]({url})**\n\n"
+            else:
+                digest_message += f"📰 **{title}**\n\n"
+            
+            if text:
+                summary = text[:800] + "..." if len(text) > 800 else text
+                digest_message += f"{summary}\n\n"
+            
+            digest_message += f"📰 Source: {source}\n"
+            digest_message += f"⏰ Next digest: Tomorrow 7:00 PM ET"
+            
+            await send_discord_alert(digest_message, 'alerts')
+            
+            # Mark as delivered to prevent future backups today
+            digest_delivery_tracker.add(today_key)
+            
+            print("✅ Backup Sundown Digest sent to Discord #alerts channel")
+        else:
+            print("❌ Invalid digest data structure for backup")
+            
+    except Exception as e:
+        print(f"❌ Backup Sundown Digest error: {e}")
+
+async def check_breaking_alerts():
+    """Check for breaking news every 15 minutes - only sends if urgent"""
+    try:
+        print("\n🚨 Checking for breaking alerts...")
+        
+        # Get high priority alerts only
+        priority_alerts = await fetch_railway_api("/api/alerts/prioritized?limit=5&urgency=HIGH")
+        
+        if not priority_alerts or not priority_alerts.get('alerts'):
+            print("🔍 No urgent breaking alerts found")
+            return
+        
+        # Filter for truly breaking news from Tier 1 sources
+        breaking_alerts = []
+        
+        for alert in priority_alerts['alerts']:
+            # Only send if it's HIGH urgency and from Tier 1 sources
+            urgency = alert.get('urgency', '').upper()
+            source = alert.get('source_name', alert.get('source', ''))
+            
+            if urgency == 'HIGH' and source in ['Coindesk', 'CryptoSlate', 'The Block', 'Decrypt']:
+                breaking_alerts.append(alert)
+        
+        if breaking_alerts:
+            alert_message = f"🚨 **BREAKING ALERT** 🚨\n\n"
+            
+            for alert in breaking_alerts[:2]:  # Max 2 breaking alerts
+                title = alert.get('title', 'Breaking news')
+                url = alert.get('url', alert.get('link', ''))
+                source = alert.get('source_name', alert.get('source', ''))
+                tickers = alert.get('tickers', [])
+                
+                if url:
+                    alert_message += f"🔴 **[{title}]({url})**\n"
+                else:
+                    alert_message += f"🔴 **{title}**\n"
+                
+                if source:
+                    alert_message += f"📰 {source}"
+                if tickers:
+                    alert_message += f" | ⚠️ {', '.join(tickers[:3])}"
+                alert_message += f"\n\n"
+            
+            await send_discord_alert(alert_message, 'alerts')
+            print(f"🚨 Breaking alert sent: {len(breaking_alerts)} urgent items")
+        else:
+            print("🔍 No breaking alerts meet urgency criteria")
+            
+    except Exception as e:
+        print(f"❌ Breaking alerts check error: {e}")
+
 async def run_trading_analysis_async():
-    """Async version of trading analysis with enhanced alerts"""
+    """Legacy async version of trading analysis - now calls specific functions"""
     print(f"\n🎯 ANALYSIS STARTED: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
@@ -658,15 +1020,31 @@ async def run_trading_analysis_async():
                 print("📰 No relevant enhanced alerts found")
         except Exception as e:
             print(f"❌ Enhanced alerts error: {e}")
-            # Fallback to original news alerts
+            # Use new prioritized alerts endpoint
             try:
-                from crypto_news_alerts import generate_news_alerts
-                news_alerts = generate_news_alerts()
-                if news_alerts:
-                    print(f"📰 Fallback: Found {len(news_alerts)} news alerts")
-                    alerts.extend(news_alerts)
-            except Exception as fallback_e:
-                print(f"❌ Fallback news alerts error: {fallback_e}")
+                import aiohttp
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(f"{RAILWAY_API_URL}/api/alerts/prioritized?limit=10&urgency=HIGH") as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            priority_alerts = data.get('alerts', [])
+                            if priority_alerts:
+                                print(f"📰 Found {len(priority_alerts)} high priority alerts")
+                                # Convert to our alert format
+                                for alert in priority_alerts:
+                                    alerts.append({
+                                        'type': 'priority_news',
+                                        'title': alert.get('title', ''),
+                                        'urgency': alert.get('urgency', 'HIGH'),
+                                        'source': alert.get('source_name', ''),
+                                        'tickers': alert.get('tickers', [])
+                                    })
+                            else:
+                                print("📰 No high priority alerts found")
+                        else:
+                            print(f"❌ Priority alerts API error: {response.status}")
+            except Exception as priority_e:
+                print(f"❌ Priority alerts error: {priority_e}")
 
         # Save all alerts
         if alerts:
@@ -739,33 +1117,111 @@ async def run_trading_analysis():
         # Step 4: Google Sheets sync disabled
         print("\n📊 Step 4: Google Sheets sync disabled by user")
 
-        # Step 5: Generate enhanced news and market alerts using Railway API
+        # Step 5: Generate enhanced news and market alerts using direct CryptoNews API
         print("\n📰 Step 5: Fetching enhanced crypto intelligence...")
         try:
-            # Get breaking news and risk alerts for #alerts channel
-            breaking_news = await fetch_railway_api("/api/crypto-news/breaking-news")
-            risk_alerts = await fetch_railway_api("/api/crypto-news/risk-alerts")
-            opportunities = await fetch_railway_api("/api/crypto-news/opportunity-scanner")
+            # Get breaking news and risk alerts for #alerts channel using direct API
+            if crypto_news_available:
+                from crypto_news_alerts import get_general_crypto_news, get_portfolio_symbols, filter_bearish_flags, filter_bullish_signals
+                
+                # Get breaking/trending news
+                breaking_news = get_general_crypto_news(items=20, sentiment=None)
+                
+                # Get portfolio symbols for risk filtering
+                portfolio_symbols = get_portfolio_symbols()
+                
+                # Filter for risk alerts (negative sentiment + portfolio symbols)
+                risk_alerts = None
+                if portfolio_symbols and breaking_news.get('data'):
+                    risk_articles = []
+                    for article in breaking_news['data']:
+                        article_tickers = article.get('tickers', [])
+                        # Check if any portfolio symbols are mentioned with negative sentiment
+                        if any(symbol in article_tickers for symbol in portfolio_symbols):
+                            if article.get('sentiment') == 'negative':
+                                risk_articles.append(article)
+                    if risk_articles:
+                        risk_alerts = {'alerts': risk_articles}
+                
+                # Get opportunities (positive sentiment news for trending symbols)
+                opportunities = get_general_crypto_news(items=15, sentiment='positive')
+            else:
+                breaking_news = None
+                risk_alerts = None
+                opportunities = None
             
-            # Send breaking news to #alerts channel
-            if breaking_news and breaking_news.get('news'):
+            # Send breaking news to #alerts channel with clickable links
+            if breaking_news and breaking_news.get('data'):
                 news_message = f"🚨 **BREAKING CRYPTO NEWS** 🚨\n"
-                for item in breaking_news['news'][:3]:  # Top 3 news
-                    news_message += f"• {item.get('title', 'Market Update')}\n"
+                for item in breaking_news['data'][:3]:  # Top 3 news
+                    title = item.get('title', 'Market Update')
+                    url = item.get('news_url', item.get('url', ''))
+                    source = item.get('source_name', item.get('source', ''))
+                    tickers = item.get('tickers', [])
+                    
+                    if url:
+                        news_message += f"📰 **[{title}]({url})**\n"
+                    else:
+                        news_message += f"📰 **{title}**\n"
+                    
+                    if source:
+                        news_message += f"📰 {source}"
+                    if tickers:
+                        news_message += f" | 🎯 {', '.join(tickers[:3])}"
+                    news_message += f"\n\n"
+                
                 await send_discord_alert(news_message, 'alerts')
             
-            # Send risk alerts to #alerts channel  
+            # Send risk alerts to #alerts channel with urgency indicators
             if risk_alerts and risk_alerts.get('alerts'):
                 risk_message = f"⚠️ **RISK ALERTS** ⚠️\n"
                 for alert in risk_alerts['alerts'][:3]:  # Top 3 risks
-                    risk_message += f"• {alert.get('message', 'Risk detected')}\n"
+                    title = alert.get('title', alert.get('message', 'Risk detected'))
+                    url = alert.get('news_url', alert.get('url', ''))
+                    urgency = alert.get('urgency', 'MEDIUM')
+                    source = alert.get('source_name', alert.get('source', ''))
+                    tickers = alert.get('tickers', [])
+                    
+                    # Urgency indicator
+                    urgency_emoji = "🔴" if urgency == "HIGH" else "🟡" if urgency == "MEDIUM" else "🟢"
+                    
+                    if url:
+                        risk_message += f"{urgency_emoji} **[{title}]({url})**\n"
+                    else:
+                        risk_message += f"{urgency_emoji} **{title}**\n"
+                    
+                    if source:
+                        risk_message += f"📰 {source}"
+                    if tickers:
+                        risk_message += f" | ⚠️ {', '.join(tickers[:3])}"
+                    risk_message += f"\n\n"
+                
                 await send_discord_alert(risk_message, 'alerts')
             
-            # Send opportunities to #alpha-scans channel
-            if opportunities and opportunities.get('opportunities'):
+            # Send opportunities to #alpha-scans channel with clickable links
+            if opportunities and opportunities.get('data'):
                 opp_message = f"🎯 **TRADING OPPORTUNITIES** 🎯\n"
-                for opp in opportunities['opportunities'][:3]:  # Top 3 opportunities
-                    opp_message += f"• {opp.get('symbol', '')} - {opp.get('signal', 'Signal detected')}\n"
+                for opp in opportunities['data'][:3]:  # Top 3 opportunities
+                    title = opp.get('title', 'Signal detected')
+                    url = opp.get('news_url', opp.get('url', ''))
+                    tickers = opp.get('tickers', [])
+                    source = opp.get('source_name', opp.get('source', ''))
+                    sentiment = opp.get('sentiment', '')
+                    
+                    if url:
+                        opp_message += f"🚀 **[{title}]({url})**\n"
+                    else:
+                        opp_message += f"🚀 **{title}**\n"
+                    
+                    if tickers:
+                        opp_message += f"💰 **{', '.join(tickers[:2])}**"
+                    if source:
+                        opp_message += f" | 📰 {source}"
+                    if sentiment:
+                        sentiment_emoji = "📈" if sentiment.lower() == "positive" else "📉" if sentiment.lower() == "negative" else "➡️"
+                        opp_message += f" | {sentiment_emoji} {sentiment.title()}"
+                    opp_message += f"\n\n"
+                
                 await send_discord_alert(opp_message, 'alpha_scans')
                 
             print("📰 Enhanced alerts sent to appropriate Discord channels")
@@ -808,12 +1264,19 @@ def main():
     """Main function with hourly scheduling"""
     print("🚀 AUTOMATED TRADING ALERTS SYSTEM")
     print("=" * 50)
-    print("📊 Features (OPTIMIZED THRESHOLDS):")
+    print("📊 MULTI-CHANNEL DISCORD INTEGRATION:")
+    print("  🚨 #alerts: Breaking news, risk alerts & Sundown Digest")
+    print("  📊 #portfolio: Hourly analysis & trading signals")
+    print("  🎯 #alpha-scans: Comprehensive reports (9AM & 9PM)")
+    print("  🌅 Sundown Digest: Mon-Fri 7:00 PM ET market wrap-up")
+    print("=" * 50)
+    print("📈 Features:")
     print("  • RSI Analysis (Overbought > 72, Oversold < 28)")
     print("  • PnL Monitoring (Loss alerts < -8%)")
     print("  • Risk Management (No SL warnings > $150)")
     print("  • High Profit Alerts (> +35%)")
-    print("  • Hourly automated analysis")
+    print("  • Real crypto news integration")
+    print("  • Long-term holds & early entry detection")
     print("=" * 50)
 
     print("🤖 Trading Alert System integrates with Discord bot")
@@ -823,9 +1286,32 @@ def main():
     print("\n🎯 Running initial analysis...")
     asyncio.run(run_trading_analysis())
 
-    # Schedule hourly runs
-    print("\n⏰ Setting up hourly schedule...")
-    schedule.every().hour.do(lambda: asyncio.run(run_trading_analysis()))
+    # Schedule different frequencies for different channels
+    print("\n⏰ Setting up multi-channel schedule...")
+    
+    # Portfolio analysis every hour
+    schedule.every().hour.do(lambda: asyncio.run(run_portfolio_analysis()))
+    
+    # Alpha scans twice daily (9 AM and 9 PM)
+    schedule.every().day.at("09:00").do(lambda: asyncio.run(run_alpha_analysis()))
+    schedule.every().day.at("21:00").do(lambda: asyncio.run(run_alpha_analysis()))
+    
+    # Breaking news alerts check every 15 minutes (only sends if urgent)
+    schedule.every(15).minutes.do(lambda: asyncio.run(check_breaking_alerts()))
+    
+    # Sundown Digest every weekday at 7 PM ET (11 PM UTC during EST, 10 PM UTC during EDT)
+    schedule.every().monday.at("23:00").do(lambda: asyncio.run(send_sundown_digest()))
+    schedule.every().tuesday.at("23:00").do(lambda: asyncio.run(send_sundown_digest()))
+    schedule.every().wednesday.at("23:00").do(lambda: asyncio.run(send_sundown_digest()))
+    schedule.every().thursday.at("23:00").do(lambda: asyncio.run(send_sundown_digest()))
+    schedule.every().friday.at("23:00").do(lambda: asyncio.run(send_sundown_digest()))
+    
+    # Backup Sundown Digest at 7:15 PM ET (23:15 UTC) in case the 7 PM delivery fails
+    schedule.every().monday.at("23:15").do(lambda: asyncio.run(send_sundown_digest_backup()))
+    schedule.every().tuesday.at("23:15").do(lambda: asyncio.run(send_sundown_digest_backup()))
+    schedule.every().wednesday.at("23:15").do(lambda: asyncio.run(send_sundown_digest_backup()))
+    schedule.every().thursday.at("23:15").do(lambda: asyncio.run(send_sundown_digest_backup()))
+    schedule.every().friday.at("23:15").do(lambda: asyncio.run(send_sundown_digest_backup()))
 
     # Start scheduler in background thread
     scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
