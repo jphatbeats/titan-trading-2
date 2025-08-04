@@ -45,7 +45,8 @@ DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
 DISCORD_CHANNELS = {
     'alerts': 1398000506068009032,        # Breaking news, risks
     'portfolio': 1399451217372905584,     # Portfolio analysis  
-    'alpha_scans': 1399790636990857277    # Trading opportunities
+    'alpha_scans': 1399790636990857277,   # Trading opportunities
+    'degen_memes': 1401971493096915067    # Degen memes, viral plays, airdrops, early gems
 }
 
 # Legacy single webhook support (backward compatible)
@@ -865,7 +866,7 @@ async def run_alpha_analysis():
             return
         
         # Get comprehensive market intelligence using direct CryptoNews API
-        from crypto_news_alerts import get_general_crypto_news, get_top_mentioned_tickers
+        from crypto_news_alerts import get_general_crypto_news, get_top_mentioned_tickers, get_viral_content
         
         # Get RECENT opportunities (positive sentiment news - LAST 24 HOURS ONLY)
         from datetime import datetime, timedelta
@@ -1000,6 +1001,117 @@ async def run_alpha_analysis():
         
     except Exception as e:
         print(f"❌ Alpha analysis error: {e}")
+
+async def run_degen_memes_scan():
+    """Degen memes channel - viral plays, airdrops, early gems, and high-risk opportunities"""
+    try:
+        print("\n🚀 DEGEN MEMES SCAN - Hunting viral plays and early gems...")
+        
+        if not crypto_news_available:
+            degen_message = f"🚀 **DEGEN MEMES SCAN** 🚀\n"
+            degen_message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+            degen_message += f"⚠️ **System Notice**: Crypto news module temporarily unavailable\n"
+            degen_message += f"🔄 Degen scans will resume once news service is restored\n\n"
+            
+            await send_discord_alert(degen_message, 'degen_memes')
+            print("⚠️ Degen scan sent fallback message")
+            return
+        
+        # Get viral/degen intelligence
+        from crypto_news_alerts import get_general_crypto_news, get_top_mentioned_tickers
+        
+        # Today's news only for maximum freshness
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # Get viral/meme content with high-risk focus
+        viral_data = get_general_crypto_news(items=30, sentiment='positive', date=today)
+        viral_plays = {'plays': viral_data.get('data', [])} if viral_data else None
+        
+        # Get social sentiment trending coins (perfect for degen plays)
+        lunarcrush_data = await fetch_lunarcrush_data()
+        trending_coins = lunarcrush_data.get('trending_coins', []) if lunarcrush_data else []
+        
+        # Get AI analysis for degen opportunities
+        ai_degen_analysis = None
+        if openai_available and (viral_plays or trending_coins):
+            try:
+                degen_scan_data = {
+                    'viral_plays': viral_plays,
+                    'trending_social': trending_coins,
+                    'lunarcrush_data': lunarcrush_data,
+                    'scan_type': 'degen_memes',
+                    'risk_tolerance': 'very_high',
+                    'timestamp': datetime.now().isoformat()
+                }
+                ai_degen_analysis = trading_ai.scan_degen_opportunities(degen_scan_data)
+                print("✅ AI degen analysis completed")
+            except Exception as ai_e:
+                print(f"⚠️ AI degen analysis failed: {ai_e}")
+        
+        # Format degen message
+        degen_message = f"🚀 **DEGEN MEMES & VIRAL PLAYS** 🚀\n"
+        degen_message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        
+        # Add AI degen insights
+        if ai_degen_analysis and not ai_degen_analysis.get('error'):
+            degen_message += f"🤖 **AI DEGEN ANALYSIS:**\n"
+            
+            # High risk/high reward setups
+            if 'viral_opportunities' in ai_degen_analysis:
+                viral_opps = ai_degen_analysis['viral_opportunities'][:3]
+                for i, opp in enumerate(viral_opps, 1):
+                    degen_message += f"💎 {i}. {opp}\n"
+            
+            # Risk warning (important for degen plays)
+            if 'risk_warning' in ai_degen_analysis:
+                degen_message += f"⚠️ **Risk**: {ai_degen_analysis['risk_warning']}\n"
+            
+            degen_message += f"\n"
+        
+        # Viral/Meme plays from news
+        if viral_plays and viral_plays.get('plays'):
+            degen_message += f"🔥 **VIRAL PLAYS & AIRDROPS:**\n"
+            viral_count = 0
+            for play in viral_plays['plays']:
+                if viral_count >= 4:
+                    break
+                    
+                title = play.get('title', '').lower()
+                # Filter for degen-relevant content
+                if any(keyword in title for keyword in ['airdrop', 'meme', 'viral', 'gem', 'moonshot', 'pump', 'ape']):
+                    title = play.get('title', 'Viral opportunity')
+                    url = play.get('news_url', play.get('url', ''))
+                    tickers = play.get('tickers', [])
+                    source = play.get('source_name', play.get('source', ''))
+                    
+                    if url:
+                        degen_message += f"🚀 **[{title[:60]}...]({url})**\n"
+                    else:
+                        degen_message += f"🚀 **{title[:60]}...**\n"
+                    
+                    if tickers:
+                        degen_message += f"💰 Tokens: {', '.join(tickers[:3])}\n"
+                    if source:
+                        degen_message += f"📰 {source}\n"
+                    degen_message += f"\n"
+                    viral_count += 1
+        
+        # Social trending (LunarCrush data)
+        if trending_coins:
+            degen_message += f"📈 **SOCIALLY TRENDING:**\n"
+            for coin in trending_coins[:5]:
+                degen_message += f"🔥 ${coin} - High social volume\n"
+            degen_message += f"\n"
+        
+        # Important disclaimer for degen channel
+        degen_message += f"⚠️ **DEGEN DISCLAIMER**: Extremely high risk plays! DYOR and only invest what you can afford to lose.\n"
+        degen_message += f"💎 **Strategy**: Micro positions, quick profits, instant stops. Meme coin roulette!"
+        
+        await send_discord_alert(degen_message, 'degen_memes')
+        print("✅ Degen memes scan sent to Discord")
+        
+    except Exception as e:
+        print(f"❌ Degen memes scan error: {e}")
 
 async def send_sundown_digest():
     """Send daily Sundown Digest to #alerts channel (Mon-Fri 7pm ET)"""
@@ -1505,6 +1617,7 @@ def main():
     print("  🚨 #alerts: AI breaking news analysis & Sundown Digest")
     print("  📊 #portfolio: AI portfolio health & trading signals")
     print("  🎯 #alpha-scans: AI opportunity scans (9AM & 9PM)")
+    print("  🚀 #degen-memes: Viral plays & early gems (8AM, 2PM, 8PM)")
     print("  🌅 Sundown Digest: Mon-Fri 7:00 PM ET market wrap-up")
     print("  🧠 All channels powered by OpenAI GPT-4o intelligence")
     print("=" * 50)
@@ -1550,6 +1663,13 @@ def main():
     schedule.every().wednesday.at("23:15").do(lambda: asyncio.run(send_sundown_digest_backup()))
     schedule.every().thursday.at("23:15").do(lambda: asyncio.run(send_sundown_digest_backup()))
     schedule.every().friday.at("23:15").do(lambda: asyncio.run(send_sundown_digest_backup()))
+    
+    # Degen Memes Scan (3 times daily: 8 AM, 2 PM, 8 PM UTC) - high frequency for viral plays
+    schedule.every().day.at("08:00").do(lambda: asyncio.run(run_degen_memes_scan()))
+    schedule.every().day.at("14:00").do(lambda: asyncio.run(run_degen_memes_scan()))  
+    schedule.every().day.at("20:00").do(lambda: asyncio.run(run_degen_memes_scan()))
+    schedule.every().day.at("14:00").do(lambda: asyncio.run(run_degen_memes_scan()))  
+    schedule.every().day.at("20:00").do(lambda: asyncio.run(run_degen_memes_scan()))
 
     # Start scheduler in background thread
     scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
