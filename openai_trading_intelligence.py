@@ -399,5 +399,70 @@ class TradingIntelligence:
                 'timestamp': datetime.now().isoformat()
             }
 
+    def scan_degen_opportunities(self, degen_data: Dict) -> Dict:
+        """AI-powered degen/memes opportunity scanner for high-risk viral plays"""
+        try:
+            viral_plays = degen_data.get('viral_plays', {})
+            trending_social = degen_data.get('trending_social', [])
+            lunarcrush_data = degen_data.get('lunarcrush_data', {})
+            
+            prompt = f"""
+            As a degenerate crypto trader expert in viral plays, meme coins, and high-risk opportunities, analyze this data for explosive short-term plays:
+
+            VIRAL CONTENT & NEWS:
+            {json.dumps(viral_plays, indent=2)}
+
+            SOCIALLY TRENDING COINS:
+            {json.dumps(trending_social, indent=2)}
+
+            LUNARCRUSH SOCIAL DATA:
+            {json.dumps(lunarcrush_data, indent=2)}
+
+            **DEGEN FOCUS**: Look for airdrops, meme coins, viral content, social media buzz, and explosive short-term opportunities.
+
+            Provide high-risk JSON analysis with:
+            1. viral_opportunities: Top 3 viral plays with maximum upside potential (focus on memes, trends, social buzz)
+            2. airdrop_alerts: Any airdrops or free token opportunities mentioned
+            3. social_momentum: Coins with explosive social media growth
+            4. meme_potential: Tokens with viral meme potential
+            5. risk_warning: Clear warning about extremely high risk nature
+            6. entry_strategy: Quick entry/exit strategies for volatile plays
+            7. position_sizing: Micro position recommendations (1-2% max)
+            8. timeline: Expected timeframes for viral plays (usually hours/days)
+            9. degen_score: Risk level from 1-10 (10 being maximum degen)
+
+            **DEGEN REQUIREMENTS**:
+            - Focus on viral potential over fundamentals
+            - Emphasize speed and social momentum
+            - Recommend tiny position sizes due to extreme risk
+            - Include specific risk warnings for each play
+            - Look for trending hashtags, social buzz, community growth
+            """
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4o",  # the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                max_tokens=1000,
+                temperature=0.7  # Slightly higher temperature for creative degen insights
+            )
+            
+            result = json.loads(response.choices[0].message.content)
+            result['analysis_type'] = 'degen_opportunities'
+            result['timestamp'] = datetime.now().isoformat()
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"AI degen analysis error: {e}")
+            return {
+                'error': 'Degen analysis temporarily unavailable',
+                'viral_opportunities': ['Check trending Twitter for viral plays'],
+                'risk_warning': 'EXTREME RISK: Only invest money you can afford to lose completely',
+                'degen_score': 10,
+                'manual_review_recommended': True,
+                'timestamp': datetime.now().isoformat()
+            }
+
 # Global instance for use in main_server.py
 trading_ai = TradingIntelligence()
