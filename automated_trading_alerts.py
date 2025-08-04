@@ -518,6 +518,24 @@ async def fetch_railway_api(endpoint):
         print(f"❌ Railway API fetch error: {e}")
         return None
 
+async def fetch_dexscreener_trending():
+    """Fetch trending tokens from DexScreener API for real degen plays"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Get trending pairs from DexScreener
+            url = "https://api.dexscreener.com/latest/dex/tokens/trending"
+            async with session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    print(f"✅ DexScreener trending data fetched: {len(data.get('pairs', []))} pairs")
+                    return data
+                else:
+                    print(f"❌ DexScreener API error: {response.status}")
+                    return None
+    except Exception as e:
+        print(f"❌ DexScreener fetch error: {e}")
+        return None
+
 async def fetch_lunarcrush_data():
     """Fetch LunarCrush social sentiment and trending data"""
     try:
@@ -1017,19 +1035,43 @@ async def run_degen_memes_scan():
             print("⚠️ Degen scan sent fallback message")
             return
         
-        # Get viral/degen intelligence
+        # Get viral/degen intelligence from multiple sources
         from crypto_news_alerts import get_general_crypto_news, get_top_mentioned_tickers
         
         # Today's news only for maximum freshness
         today = datetime.now().strftime('%Y-%m-%d')
         
-        # Get viral/meme content with high-risk focus
-        viral_data = get_general_crypto_news(items=30, sentiment='positive', date=today)
-        viral_plays = {'plays': viral_data.get('data', [])} if viral_data else None
+        # Get DexScreener trending tokens (actual new/viral coins)
+        dex_trending = await fetch_dexscreener_trending()
         
-        # Get social sentiment trending coins (perfect for degen plays)
+        # Get viral/meme content with degen-specific keywords
+        viral_keywords = ['meme', 'viral', 'pump', 'gem', 'moonshot', 'degen', 'ape', 'airdrop', 'new token', 'launch']
+        viral_data = get_general_crypto_news(items=20, sentiment='positive', date=today)
+        
+        # Filter for actual meme/viral content (not major coins)
+        major_coins = ['BTC', 'ETH', 'SOL', 'ADA', 'MATIC', 'AVAX', 'DOT', 'LINK', 'UNI', 'ATOM']
+        viral_plays = None
+        if viral_data and viral_data.get('data'):
+            filtered_plays = []
+            for play in viral_data['data']:
+                title = play.get('title', '').lower()
+                tickers = play.get('tickers', [])
+                
+                # Skip if only mentions major coins
+                if tickers and all(ticker in major_coins for ticker in tickers):
+                    continue
+                    
+                # Include if mentions degen keywords or unknown tickers
+                if any(keyword in title for keyword in viral_keywords) or not tickers:
+                    filtered_plays.append(play)
+            
+            viral_plays = {'plays': filtered_plays} if filtered_plays else None
+        
+        # Get small cap trending coins from LunarCrush (filter out major coins)
         lunarcrush_data = await fetch_lunarcrush_data()
-        trending_coins = lunarcrush_data.get('trending_coins', []) if lunarcrush_data else []
+        trending_coins = []
+        if lunarcrush_data and lunarcrush_data.get('trending_coins'):
+            trending_coins = [coin for coin in lunarcrush_data['trending_coins'] if coin not in major_coins]
         
         # Get AI analysis for degen opportunities
         ai_degen_analysis = None
@@ -1038,9 +1080,12 @@ async def run_degen_memes_scan():
                 degen_scan_data = {
                     'viral_plays': viral_plays,
                     'trending_social': trending_coins,
+                    'dex_trending': dex_trending, 
                     'lunarcrush_data': lunarcrush_data,
                     'scan_type': 'degen_memes',
                     'risk_tolerance': 'very_high',
+                    'major_coins_excluded': major_coins,
+                    'focus': 'new_launches_and_meme_coins_only',
                     'timestamp': datetime.now().isoformat()
                 }
                 ai_degen_analysis = trading_ai.scan_degen_opportunities(degen_scan_data)
@@ -1096,11 +1141,25 @@ async def run_degen_memes_scan():
                     degen_message += f"\n"
                     viral_count += 1
         
-        # Social trending (LunarCrush data)
+        # DexScreener trending (actual new/viral tokens)
+        if dex_trending and dex_trending.get('pairs'):
+            degen_message += f"🔥 **DEXSCREENER HOT:**\n"
+            for pair in dex_trending['pairs'][:4]:
+                token_name = pair.get('baseToken', {}).get('name', 'Unknown')
+                symbol = pair.get('baseToken', {}).get('symbol', '')
+                price_change = pair.get('priceChange', {}).get('h24', 0)
+                volume = pair.get('volume', {}).get('h24', 0)
+                
+                if price_change > 50:  # Only show big movers
+                    change_emoji = "🚀" if price_change > 100 else "📈"
+                    degen_message += f"{change_emoji} **${symbol}** ({token_name}) +{price_change:.1f}% | Vol: ${volume:,.0f}\n"
+            degen_message += f"\n"
+        
+        # Social trending (Small caps only)
         if trending_coins:
-            degen_message += f"📈 **SOCIALLY TRENDING:**\n"
+            degen_message += f"📱 **SOCIAL BUZZ (Small Caps):**\n"
             for coin in trending_coins[:5]:
-                degen_message += f"🔥 ${coin} - High social volume\n"
+                degen_message += f"🔥 ${coin} - Rising social mentions\n"
             degen_message += f"\n"
         
         # Important disclaimer for degen channel
