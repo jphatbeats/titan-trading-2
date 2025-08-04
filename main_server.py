@@ -1646,19 +1646,46 @@ def get_chatgpt_opportunity_scanner():
         if not openai_available:
             return jsonify({'error': 'AI opportunity scanning requires OpenAI integration'}), 503
         
-        # Gather market data
+        # Gather comprehensive market data with OHLCV and technical indicators
         market_data = {}
         for exchange in exchange_manager.get_available_exchanges():
             try:
-                # Get top crypto tickers
-                tickers = {}
-                for symbol in ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'ADA/USDT']:
+                # Get comprehensive data for top crypto assets
+                exchange_data = {}
+                for symbol in ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'ADA/USDT', 'MATIC/USDT', 'AVAX/USDT']:
                     try:
+                        # Get current ticker (price, volume, etc.)
                         ticker = trading_functions.get_ticker(exchange, symbol)
-                        tickers[symbol] = ticker
+                        
+                        # Get recent OHLCV data for pattern analysis
+                        try:
+                            ohlcv = trading_functions.get_ohlcv(exchange, symbol, '1h', limit=24)  # 24 hours of data
+                            
+                            # Calculate basic technical indicators from OHLCV
+                            if ohlcv and len(ohlcv) > 0:
+                                recent_closes = [candle[4] for candle in ohlcv[-10:]]  # Last 10 closes
+                                if len(recent_closes) > 1:
+                                    price_change_24h = ((recent_closes[-1] - recent_closes[0]) / recent_closes[0]) * 100
+                                    volatility = max(recent_closes) - min(recent_closes)
+                                    avg_volume = sum([candle[5] for candle in ohlcv[-5:]]) / 5  # 5-period volume avg
+                                    
+                                    ticker['technical_data'] = {
+                                        'price_change_24h': price_change_24h,
+                                        'volatility': volatility,
+                                        'avg_volume_5h': avg_volume,
+                                        'recent_high': max(recent_closes),
+                                        'recent_low': min(recent_closes),
+                                        'ohlcv_count': len(ohlcv)
+                                    }
+                        except:
+                            # If OHLCV fails, still provide basic ticker data
+                            ticker['technical_data'] = {'status': 'basic_data_only'}
+                        
+                        exchange_data[symbol] = ticker
                     except:
                         continue
-                market_data[exchange] = tickers
+                        
+                market_data[exchange] = exchange_data
             except:
                 market_data[exchange] = {'status': 'error'}
         
