@@ -71,21 +71,79 @@ class CryptoNewsAPI:
         """Get news by specific symbols using tickers+search workaround"""
         if not symbols:
             return {'data': [], 'message': 'No symbols provided'}
-            
-        params = {
-            'items': min(limit, 50),
-            'tickers': 'BTC'  # Required dummy parameter
-        }
         
-        # WORKAROUND: Use search parameter for actual results
-        if mode == "broad":
-            params['search'] = ','.join(symbols)  # Search for any symbol
-        elif mode == "intersection":
-            params['search'] = ' AND '.join(symbols)  # All symbols required
-        elif mode == "laser":
-            params['search'] = symbols[0] if symbols else 'BTC'  # Single symbol
+        if mode == "laser" and len(symbols) == 1:
+            # Single symbol search - try direct ticker first, then search fallback
+            symbol = symbols[0]
             
-        return self._make_request('', params)
+            # Try direct ticker search first (works for MAMO)
+            params = {
+                'items': min(limit, 50),
+                'tickers': symbol
+            }
+            result = self._make_request('', params)
+            
+            # If direct ticker fails, try search workaround (works for ENA)
+            if not result.get('data'):
+                params = {
+                    'items': min(limit, 50),
+                    'tickers': 'BTC',  # Required dummy parameter
+                    'search': symbol
+                }
+                result = self._make_request('', params)
+            
+            return result
+        
+        elif mode == "broad" and len(symbols) > 1:
+            # Multi-symbol search - combine individual results
+            all_articles = []
+            seen_titles = set()
+            
+            for symbol in symbols:
+                # Try direct ticker first, then search fallback
+                params = {
+                    'items': min(limit, 20),
+                    'tickers': symbol
+                }
+                result = self._make_request('', params)
+                
+                # If direct ticker fails, try search workaround
+                if not result.get('data'):
+                    params = {
+                        'items': min(limit, 20),
+                        'tickers': 'BTC',
+                        'search': symbol
+                    }
+                    result = self._make_request('', params)
+                
+                if 'data' in result:
+                    for article in result['data']:
+                        title = article.get('title', '')
+                        # Avoid duplicates and add symbol context
+                        if title not in seen_titles:
+                            article['search_symbol'] = symbol
+                            all_articles.append(article)
+                            seen_titles.add(title)
+            
+            # Sort by date and limit results
+            all_articles = sorted(all_articles, 
+                                key=lambda x: x.get('published_at', ''), 
+                                reverse=True)[:limit]
+            
+            return {
+                'data': all_articles,
+                'symbols_searched': symbols,
+                'total_found': len(all_articles)
+            }
+        
+        else:
+            # Fallback for other modes
+            params = {
+                'items': min(limit, 50),
+                'tickers': 'BTC',
+                'search': ' AND '.join(symbols) if mode == "intersection" else ','.join(symbols)
+            }
+            return self._make_request('', params)
     
     def get_risk_alerts(self, limit: int = 20, severity: str = "high") -> Dict[str, Any]:
         """Get risk-related crypto news and alerts"""
