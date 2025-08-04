@@ -16,17 +16,9 @@ except ImportError:
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
-try:
-    from crypto_news_api import (
-        crypto_news_api, get_breaking_crypto_news, get_crypto_risk_alerts,
-        get_crypto_bullish_signals, scan_crypto_opportunities, 
-        get_market_intelligence, detect_pump_dump_signals
-    )
-    crypto_news_available = True
-except ImportError:
-    crypto_news_available = False
-    logger = logging.getLogger(__name__)
-    logger.warning("Crypto news API module not available")
+# CryptoNews API imports removed - Direct API integration now used by ChatGPT
+# All news intelligence functionality moved to https://cryptonews-api.com direct calls
+crypto_news_available = False  # Wrapper system deprecated
 
 try:
     from error_handler import handle_exchange_error, ExchangeNotAvailableError
@@ -312,7 +304,7 @@ def root():
         'message': 'Crypto Trading API Server',
         'version': '2.1.0',
         'status': 'running',
-        'available_endpoints': 35,
+        'available_endpoints': 25,
         'available_exchanges': exchange_manager.get_available_exchanges(),
         'total_exchanges': len(exchange_manager.get_available_exchanges()),
         'live_endpoints': {
@@ -1177,310 +1169,59 @@ def track_news_performance():
         return jsonify({'error': 'Failed to track performance'}), 500
 
 # ============================================================================
-# CRYPTO NEWS ENDPOINTS
+# CRYPTO NEWS ENDPOINTS - DEPRECATED & MIGRATED TO DIRECT API
+# ============================================================================
+# These wrapper endpoints have been deprecated. ChatGPT now calls the real 
+# CryptoNews API directly using comprehensive instructions from:
+# cryptonews_chatgpt_instructions.md
+# 
+# Migration Status: COMPLETE
+# - Removed 10 wrapper endpoints 
+# - ChatGPT now has direct access to https://cryptonews-api.com
+# - Full sophistication unlocked: 18+ topics, 75+ sources, advanced ticker logic
 # ============================================================================
 
-@app.route('/api/crypto-news/breaking-news', methods=['GET'])
-def get_breaking_crypto_news():
-    """Get breaking crypto news with filtering options"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        # Extract query parameters
-        hours = request.args.get('hours', 24, type=int)
-        items = request.args.get('items', 50, type=int)
-        exclude_portfolio = request.args.get('exclude_portfolio', 'false').lower() == 'true'
-        sentiment = request.args.get('sentiment')
-        source = request.args.get('source')
-        topic = request.args.get('topic')
-        search = request.args.get('search')
-        
-        # Get general crypto news (breaking news equivalent)
-        result = get_general_crypto_news(
-            items=items,
-            sentiment=sentiment,
-            source=source,
-            topic=topic,
-            search=search
-        )
-        
-        # Return simplified format for ChatGPT compatibility
-        articles = result.get('data', [])
-        return jsonify({
-            'success': True,
-            'data': {
-                'articles': articles,
-                'count': len(articles),
-                'filters': {
-                    'hours': hours,
-                    'items': items,
-                    'sentiment': sentiment,
-                    'source': source,
-                    'topic': topic
-                }
-            },
-            'message': f'Found {len(articles)} breaking crypto news articles'
-        })
-    except Exception as e:
-        logger.error(f"Error getting breaking crypto news: {str(e)}")
-        return jsonify({'error': 'Failed to fetch crypto news'}), 500
+@app.route('/api/crypto-news/status', methods=['GET'])
+def crypto_news_migration_status():
+    """Migration status for CryptoNews API integration"""
+    return jsonify({
+        'migration_status': 'complete',
+        'integration_type': 'direct_api_access',
+        'old_wrapper_endpoints': 'deprecated',
+        'chatgpt_instructions': 'cryptonews_chatgpt_instructions.md',
+        'api_base_url': 'https://cryptonews-api.com',
+        'capabilities_unlocked': {
+            'advanced_ticker_logic': ['tickers (OR)', 'tickers-include (AND)', 'tickers-only (exclusive)'],
+            'topic_categories': 18,
+            'news_sources': 75,
+            'specialized_endpoints': 7,
+            'sentiment_analysis': ['positive', 'negative', 'neutral'],
+            'time_ranges': 'last5min to last30days'
+        },
+        'removed_wrapper_endpoints': [
+            '/api/crypto-news/breaking-news',
+            '/api/crypto-news/top-mentioned', 
+            '/api/crypto-news/sentiment',
+            '/api/crypto-news/portfolio',
+            '/api/crypto-news/symbols/<symbols>',
+            '/api/crypto-news/risk-alerts',
+            '/api/crypto-news/bullish-signals',
+            '/api/crypto-news/opportunity-scanner',
+            '/api/crypto-news/market-intelligence',
+            '/api/crypto-news/pump-dump-detector'
+        ],
+        'benefits': [
+            'No wrapper complexity or translation layers',
+            'Direct access to sophisticated API features',
+            'Authentic data from real CryptoNews sources',
+            'Advanced filtering and search capabilities',
+            'Real-time access to all 75+ news sources'
+        ],
+        'timestamp': datetime.now().isoformat()
+    })
 
-@app.route('/api/crypto-news/top-mentioned', methods=['GET'])
-def get_top_mentioned():
-    """Get top mentioned crypto tickers"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        date = request.args.get('date', 'last7days')
-        cache = request.args.get('cache', 'false').lower() == 'true'
-        
-        result = get_top_mentioned_tickers(date=date, cache=cache)
-        
-        tickers = result.get('data', [])
-        return jsonify({
-            'success': True,
-            'data': {
-                'tickers': tickers,
-                'count': len(tickers)
-            },
-            'message': f'Found {len(tickers)} top mentioned crypto tickers'
-        })
-    except Exception as e:
-        logger.error(f"Error getting top mentioned tickers: {str(e)}")
-        return jsonify({'error': 'Failed to fetch top mentioned tickers'}), 500
-
-@app.route('/api/crypto-news/sentiment', methods=['GET'])
-def get_crypto_sentiment():
-    """Get sentiment analysis for crypto tickers"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        tickers = request.args.get('tickers')
-        section = request.args.get('section')
-        date = request.args.get('date', 'last30days')
-        
-        result = get_sentiment_analysis(
-            tickers=tickers,
-            section=section,
-            date=date
-        )
-        
-        sentiment_data = result.get('data', [])
-        return jsonify({
-            'success': True,
-            'data': {
-                'sentiment_analysis': sentiment_data,
-                'tickers_analyzed': tickers,
-                'period': date
-            },
-            'message': f'Sentiment analysis completed for {tickers or "crypto market"}'
-        })
-    except Exception as e:
-        logger.error(f"Error getting sentiment analysis: {str(e)}")
-        return jsonify({'error': 'Failed to fetch sentiment analysis'}), 500
-
-@app.route('/api/crypto-news/portfolio', methods=['GET'])
-def get_portfolio_crypto_news():
-    """Get crypto news filtered for portfolio holdings"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        portfolio_symbols = request.args.get('symbols', '').split(',')
-        if portfolio_symbols == ['']:
-            portfolio_symbols = []
-        
-        limit = request.args.get('limit', 15, type=int)
-        
-        result = crypto_news_api.get_portfolio_news(portfolio_symbols, limit=limit)
-        
-        articles = result.get('data', [])
-        return jsonify({
-            'success': True,
-            'data': {
-                'articles': articles,
-                'count': len(articles),
-                'portfolio_symbols': portfolio_symbols
-            },
-            'message': f'Found {len(articles)} news articles for portfolio symbols'
-        })
-    except Exception as e:
-        logger.error(f"Error getting portfolio crypto news: {str(e)}")
-        return jsonify({'error': 'Failed to fetch portfolio news'}), 500
-
-@app.route('/api/crypto-news/symbols/<symbols>', methods=['GET'])
-def get_crypto_news_by_symbols(symbols):
-    """Get crypto news for specific symbols"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        symbol_list = symbols.split(',')
-        limit = request.args.get('limit', 10, type=int)
-        mode = request.args.get('mode', 'broad')  # broad, intersection, laser
-        
-        result = crypto_news_api.get_news_by_symbols(symbol_list, limit=limit, mode=mode)
-        
-        articles = result.get('data', [])
-        return jsonify({
-            'success': True,
-            'data': {
-                'articles': articles,
-                'count': len(articles),
-                'symbols': symbol_list,
-                'mode': mode
-            },
-            'message': f'Found {len(articles)} news articles for {len(symbol_list)} symbols'
-        })
-    except Exception as e:
-        logger.error(f"Error getting crypto news by symbols: {str(e)}")
-        return jsonify({'error': 'Failed to fetch symbol news'}), 500
-
-@app.route('/api/crypto-news/risk-alerts', methods=['GET'])
-def get_crypto_risk_alerts_endpoint():
-    """Get crypto risk alerts and warnings"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        limit = request.args.get('limit', 20, type=int)
-        severity = request.args.get('severity', 'high')
-        
-        result = crypto_news_api.get_risk_alerts(limit=limit, severity=severity)
-        
-        return jsonify({
-            'status': 'success',
-            'count': len(result.get('data', [])),
-            'alerts': result.get('data', []),
-            'alert_type': 'risk_warnings',
-            'severity': severity,
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Error getting crypto risk alerts: {str(e)}")
-        return jsonify({'error': 'Failed to fetch risk alerts'}), 500
-
-@app.route('/api/crypto-news/bullish-signals', methods=['GET'])
-def get_crypto_bullish_signals_endpoint():
-    """Get bullish crypto signals and positive news"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        limit = request.args.get('limit', 15, type=int)
-        timeframe = request.args.get('timeframe', 'last6hours')
-        
-        result = crypto_news_api.get_bullish_signals(limit=limit, timeframe=timeframe)
-        
-        return jsonify({
-            'status': 'success',
-            'count': len(result.get('data', [])),
-            'signals': result.get('data', []),
-            'signal_type': 'bullish_sentiment',
-            'timeframe': timeframe,
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Error getting bullish signals: {str(e)}")
-        return jsonify({'error': 'Failed to fetch bullish signals'}), 500
-
-@app.route('/api/crypto-news/opportunity-scanner', methods=['GET'])
-def scan_crypto_opportunities_endpoint():
-    """Scan for crypto trading opportunities in news"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        sectors = request.args.get('sectors', 'AI,DeFi,Gaming,RWA,Layer2').split(',')
-        limit = request.args.get('limit', 25, type=int)
-        
-        result = crypto_news_api.scan_opportunities(sectors=sectors, limit=limit)
-        
-        opportunities = []
-        for article in result.get('data', []):
-            opportunities.append({
-                'title': article.get('title'),
-                'source': article.get('source_name', article.get('source')),
-                'sentiment': article.get('sentiment'),
-                'tickers': article.get('tickers', []),
-                'opportunity_type': 'sector_based',
-                'date': article.get('date'),
-                'url': article.get('url')
-            })
-        
-        return jsonify({
-            'status': 'success',
-            'count': len(opportunities),
-            'opportunities': opportunities,
-            'sectors_scanned': sectors,
-            'scan_type': 'news_opportunities',
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Error scanning crypto opportunities: {str(e)}")
-        return jsonify({'error': 'Failed to scan opportunities'}), 500
-
-@app.route('/api/crypto-news/market-intelligence', methods=['GET'])
-def get_market_intelligence_endpoint():
-    """Get comprehensive market intelligence"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        comprehensive = request.args.get('comprehensive', 'true').lower() == 'true'
-        
-        result = crypto_news_api.get_market_intelligence(comprehensive=comprehensive)
-        
-        return jsonify({
-            'status': 'success',
-            'market_overview': {
-                'latest_news': result.get('data', [])[:15],
-                'comprehensive': comprehensive,
-                'data_source': 'tier_1_sources'
-            },
-            'intelligence_type': 'comprehensive' if comprehensive else 'summary',
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Error getting market intelligence: {str(e)}")
-        return jsonify({'error': 'Failed to fetch market intelligence'}), 500
-
-@app.route('/api/crypto-news/pump-dump-detector', methods=['GET'])
-def detect_pump_dump_signals_endpoint():
-    """Detect potential pump and dump signals"""
-    if not crypto_news_available:
-        return jsonify({'error': 'Crypto news service not available'}), 503
-    
-    try:
-        limit = request.args.get('limit', 20, type=int)
-        
-        result = crypto_news_api.detect_pump_dump_signals(limit=limit)
-        
-        signals = []
-        for article in result.get('data', []):
-            signals.append({
-                'title': article.get('title'),
-                'source': article.get('source_name', article.get('source')),
-                'tickers': article.get('tickers', []),
-                'signal_type': 'pump_dump_warning',
-                'confidence': 'medium',
-                'date': article.get('date'),
-                'url': article.get('url')
-            })
-        
-        return jsonify({
-            'status': 'success',
-            'count': len(signals),
-            'signals': signals,
-            'detector_type': 'news_based',
-            'timestamp': datetime.now().isoformat()
-        })
-    except Exception as e:
-        logger.error(f"Error detecting pump dump signals: {str(e)}")
-        return jsonify({'error': 'Failed to detect pump dump signals'}), 500
+# CryptoNews wrapper endpoints removed (254 lines) - ChatGPT now uses direct API integration
+# All /api/crypto-news/* endpoints deprecated in favor of https://cryptonews-api.com direct calls
 
 # ============================================================================
 # BINGX SPECIFIC ENDPOINTS
@@ -1751,79 +1492,216 @@ def get_kraken_trading_stats():
         return jsonify({'error': 'Internal server error'}), 500
 
 # ============================================================================
-# CHATGPT ANALYSIS ENDPOINTS
+# REAL CHATGPT AI ANALYSIS ENDPOINTS - POWERED BY OPENAI GPT-4
 # ============================================================================
 
-@app.route('/api/chatgpt/account-summary', methods=['GET'])
-def get_chatgpt_account_summary():
-    """Get AI-powered account summary"""
-    try:
-        # Get data from all available exchanges
-        summary_data = {}
-        for exchange in exchange_manager.get_available_exchanges():
-            try:
-                balance = trading_functions.get_balance(exchange)
-                summary_data[exchange] = {
-                    'balance': balance,
-                    'status': 'active'
-                }
-            except:
-                summary_data[exchange] = {'status': 'error'}
-        
-        ai_summary = {
-            'analysis_type': 'account_summary',
-            'exchanges_analyzed': list(summary_data.keys()),
-            'account_data': summary_data,
-            'ai_insights': [
-                'Account analysis completed',
-                f'Found {len(summary_data)} exchange accounts',
-                'Portfolio diversification recommended'
-            ],
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        return jsonify(ai_summary)
-    except Exception as e:
-        logger.error(f"Error generating ChatGPT account summary: {str(e)}")
-        return jsonify({'error': 'Failed to generate account summary'}), 500
+# Import the real AI trading intelligence
+try:
+    from openai_trading_intelligence import trading_ai
+    openai_available = True
+    logger.info("OpenAI Trading Intelligence loaded successfully")
+except ImportError as e:
+    logger.warning(f"OpenAI not available: {e}")
+    openai_available = False
 
 @app.route('/api/chatgpt/portfolio-analysis', methods=['GET'])
 def get_chatgpt_portfolio_analysis():
-    """Get AI-powered portfolio analysis"""
+    """Get REAL AI-powered portfolio analysis using OpenAI GPT-4"""
     try:
-        # Gather portfolio data from all exchanges
-        portfolio_data = {}
-        total_assets = 0
+        if not openai_available:
+            return jsonify({'error': 'AI analysis requires OpenAI integration'}), 503
         
+        # Gather real portfolio data from all exchanges
+        portfolio_data = {}
         for exchange in exchange_manager.get_available_exchanges():
             try:
+                balance = trading_functions.get_balance(exchange)
                 portfolio = trading_functions.get_portfolio(exchange)
-                portfolio_data[exchange] = portfolio
-                total_assets += len(portfolio.get('assets', []))
-            except:
-                portfolio_data[exchange] = {'error': 'Unable to fetch data'}
+                portfolio_data[exchange] = {
+                    'balance': balance,
+                    'portfolio': portfolio,
+                    'status': 'active'
+                }
+            except Exception as ex:
+                portfolio_data[exchange] = {'status': 'error', 'error': str(ex)}
         
-        ai_analysis = {
-            'analysis_type': 'portfolio_analysis',
-            'portfolio_overview': {
-                'total_exchanges': len(portfolio_data),
-                'total_assets': total_assets,
-                'diversification_score': min(total_assets * 10, 100)  # Simple score
-            },
-            'exchange_portfolios': portfolio_data,
-            'ai_recommendations': [
-                'Consider rebalancing portfolio across exchanges',
-                'Monitor high-volatility assets closely',
-                'Diversification appears adequate' if total_assets > 5 else 'Consider increasing diversification'
-            ],
-            'risk_assessment': 'moderate',
-            'timestamp': datetime.now().isoformat()
-        }
+        # Get REAL AI analysis from OpenAI GPT-4
+        ai_analysis = trading_ai.analyze_portfolio(portfolio_data)
         
         return jsonify(ai_analysis)
     except Exception as e:
         logger.error(f"Error generating ChatGPT portfolio analysis: {str(e)}")
-        return jsonify({'error': 'Failed to generate portfolio analysis'}), 500
+        return jsonify({'error': 'Failed to generate AI portfolio analysis'}), 500
+
+@app.route('/api/chatgpt/news-sentiment', methods=['POST'])
+def get_chatgpt_news_sentiment():
+    """Grade news articles for bullish/bearish sentiment using AI"""
+    try:
+        if not openai_available:
+            return jsonify({'error': 'AI sentiment analysis requires OpenAI integration'}), 503
+        
+        news_data = request.get_json()
+        if not news_data or 'articles' not in news_data:
+            return jsonify({'error': 'Must provide articles array in request body'}), 400
+        
+        # Get REAL AI sentiment analysis from OpenAI GPT-4
+        sentiment_analysis = trading_ai.grade_news_sentiment(news_data['articles'])
+        
+        return jsonify(sentiment_analysis)
+    except Exception as e:
+        logger.error(f"Error in ChatGPT news sentiment analysis: {str(e)}")
+        return jsonify({'error': 'Failed to analyze news sentiment'}), 500
+
+@app.route('/api/chatgpt/trade-grader', methods=['POST'])
+def get_chatgpt_trade_grader():
+    """Grade trade performance and provide improvement suggestions"""
+    try:
+        if not openai_available:
+            return jsonify({'error': 'AI trade grading requires OpenAI integration'}), 503
+        
+        trade_data = request.get_json()
+        if not trade_data:
+            return jsonify({'error': 'Must provide trade data in request body'}), 400
+        
+        # Get REAL AI trade grading from OpenAI GPT-4
+        trade_grade = trading_ai.grade_trade_performance(trade_data)
+        
+        return jsonify(trade_grade)
+    except Exception as e:
+        logger.error(f"Error in ChatGPT trade grading: {str(e)}")
+        return jsonify({'error': 'Failed to grade trade performance'}), 500
+
+@app.route('/api/chatgpt/hourly-insights', methods=['GET'])
+def get_chatgpt_hourly_insights():
+    """Get AI-powered hourly trading insights for current conditions"""
+    try:
+        if not openai_available:
+            return jsonify({'error': 'AI insights require OpenAI integration'}), 503
+        
+        # Gather current market and portfolio data
+        market_data = {}
+        portfolio_data = {}
+        
+        for exchange in exchange_manager.get_available_exchanges():
+            try:
+                # Get market data
+                btc_ticker = trading_functions.get_ticker(exchange, 'BTC/USDT')
+                eth_ticker = trading_functions.get_ticker(exchange, 'ETH/USDT')
+                market_data[exchange] = {
+                    'BTC': btc_ticker,
+                    'ETH': eth_ticker
+                }
+                
+                # Get portfolio data  
+                balance = trading_functions.get_balance(exchange)
+                portfolio_data[exchange] = balance
+            except:
+                market_data[exchange] = {'status': 'error'}
+                portfolio_data[exchange] = {'status': 'error'}
+        
+        # Get REAL AI insights from OpenAI GPT-4
+        ai_insights = trading_ai.generate_hourly_insights(market_data, portfolio_data)
+        
+        return jsonify(ai_insights)
+    except Exception as e:
+        logger.error(f"Error generating ChatGPT hourly insights: {str(e)}")
+        return jsonify({'error': 'Failed to generate AI insights'}), 500
+
+@app.route('/api/chatgpt/risk-assessment', methods=['GET'])
+def get_chatgpt_risk_assessment():
+    """Get AI-powered risk assessment of current portfolio"""
+    try:
+        if not openai_available:
+            return jsonify({'error': 'AI risk assessment requires OpenAI integration'}), 503
+        
+        # Gather portfolio and market condition data
+        portfolio_data = {}
+        market_conditions = {}
+        
+        for exchange in exchange_manager.get_available_exchanges():
+            try:
+                portfolio = trading_functions.get_portfolio(exchange)
+                balance = trading_functions.get_balance(exchange)
+                portfolio_data[exchange] = {'portfolio': portfolio, 'balance': balance}
+                
+                # Get market conditions (volatility indicators)
+                btc_ticker = trading_functions.get_ticker(exchange, 'BTC/USDT')
+                market_conditions[exchange] = btc_ticker
+            except:
+                portfolio_data[exchange] = {'status': 'error'}
+                market_conditions[exchange] = {'status': 'error'}
+        
+        # Get REAL AI risk assessment from OpenAI GPT-4
+        risk_assessment = trading_ai.assess_risk_profile(portfolio_data, market_conditions)
+        
+        return jsonify(risk_assessment)
+    except Exception as e:
+        logger.error(f"Error in ChatGPT risk assessment: {str(e)}")
+        return jsonify({'error': 'Failed to assess portfolio risk'}), 500
+
+@app.route('/api/chatgpt/opportunity-scanner', methods=['GET'])
+def get_chatgpt_opportunity_scanner():
+    """AI-powered opportunity scanner for new trades"""
+    try:
+        if not openai_available:
+            return jsonify({'error': 'AI opportunity scanning requires OpenAI integration'}), 503
+        
+        # Gather market data
+        market_data = {}
+        for exchange in exchange_manager.get_available_exchanges():
+            try:
+                # Get top crypto tickers
+                tickers = {}
+                for symbol in ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'ADA/USDT']:
+                    try:
+                        ticker = trading_functions.get_ticker(exchange, symbol)
+                        tickers[symbol] = ticker
+                    except:
+                        continue
+                market_data[exchange] = tickers
+            except:
+                market_data[exchange] = {'status': 'error'}
+        
+        # Get recent news for context (if available)
+        news_data = {'status': 'News integration available via direct CryptoNews API'}
+        
+        # Get REAL AI opportunity analysis from OpenAI GPT-4
+        opportunities = trading_ai.scan_opportunities(market_data, news_data)
+        
+        return jsonify(opportunities)
+    except Exception as e:
+        logger.error(f"Error in ChatGPT opportunity scanning: {str(e)}")
+        return jsonify({'error': 'Failed to scan for opportunities'}), 500
+
+@app.route('/api/chatgpt/account-summary', methods=['GET'])
+def get_chatgpt_account_summary():
+    """Get comprehensive AI-powered account summary"""
+    try:
+        if not openai_available:
+            return jsonify({'error': 'AI account analysis requires OpenAI integration'}), 503
+        
+        # Gather comprehensive account data
+        account_data = {}
+        for exchange in exchange_manager.get_available_exchanges():
+            try:
+                balance = trading_functions.get_balance(exchange)
+                portfolio = trading_functions.get_portfolio(exchange)
+                account_data[exchange] = {
+                    'balance': balance,
+                    'portfolio': portfolio,
+                    'status': 'active'
+                }
+            except:
+                account_data[exchange] = {'status': 'error'}
+        
+        # Get REAL AI account analysis from OpenAI GPT-4
+        ai_summary = trading_ai.analyze_portfolio(account_data)
+        ai_summary['analysis_type'] = 'account_summary'
+        
+        return jsonify(ai_summary)
+    except Exception as e:
+        logger.error(f"Error generating ChatGPT account summary: {str(e)}")
+        return jsonify({'error': 'Failed to generate AI account summary'}), 500
 
 @app.errorhandler(Exception)
 def handle_unexpected_error(error):
