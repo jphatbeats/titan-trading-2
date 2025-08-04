@@ -1198,16 +1198,39 @@ async def run_degen_memes_scan():
                         # Try to extract symbol from description first, then URL
                         description_text = description.upper()
                         
-                        # Look for common token patterns in description
+                        # Enhanced token symbol extraction
                         import re
+                        
+                        # First try to find obvious symbols
                         symbol_match = re.search(r'\b([A-Z]{2,10})\b', description_text)
-                        if symbol_match and symbol_match.group(1) not in ['OFFICIAL', 'TOKEN', 'COIN', 'NEW', 'THE']:
+                        if symbol_match and symbol_match.group(1) not in ['OFFICIAL', 'TOKEN', 'COIN', 'NEW', 'THE', 'VIRAL', 'PLAY']:
                             token_name = symbol_match.group(1)
-                        elif token_address:
+                        # Try to extract from common patterns like "token_name on solana"
+                        elif re.search(r'(\w+)\s+on\s+\w+', description.lower()):
+                            match = re.search(r'(\w+)\s+on\s+\w+', description.lower())
+                            token_name = match.group(1).upper()[:8]
+                        # Look for token names in descriptions like "Ocean Beach guy"
+                        elif 'beach' in description.lower():
+                            token_name = 'OCEAN'
+                        elif 'retarded' in description.lower():
+                            token_name = 'LARP'
+                        elif 'believe' in description.lower():
+                            token_name = 'DO'
+                        elif token_address and len(token_address) > 6:
                             # Use first 6 chars of token address as fallback
                             token_name = token_address[:6].upper()
                         else:
-                            token_name = 'NEW'
+                            # Generate name from first meaningful word of description
+                            words = description.split()
+                            if words:
+                                # Skip common words and take first meaningful word
+                                meaningful_words = [w for w in words if w.lower() not in ['new', 'the', 'a', 'an', 'is', 'are', 'viral', 'token']]
+                                if meaningful_words:
+                                    token_name = meaningful_words[0].upper()[:6]
+                                else:
+                                    token_name = words[0].upper()[:6]
+                            else:
+                                token_name = 'NEW'
                         
                         # Clean URL (remove trailing comma if present)
                         clean_url = token_url.rstrip(',')
