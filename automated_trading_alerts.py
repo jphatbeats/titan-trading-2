@@ -16,6 +16,7 @@ import threading
 import asyncio
 import aiohttp
 import requests
+import discord
 
 # Import crypto news module
 try:
@@ -39,32 +40,12 @@ except Exception as e:
     openai_available = False
     print(f"❌ OpenAI initialization error: {e}")
 
-# Import degen news aggregator for alpha scans
-try:
-    sys.path.append('.')
-    from degen_news_sources import get_degen_news, get_trending_degen_coins
-    degen_news_available = True
-    print("✅ Degen News Aggregator loaded successfully")
-except ImportError as e:
-    degen_news_available = False
-    print(f"❌ Degen News Aggregator not available: {e}")
-
-# Import degen news aggregator for alpha scans
-try:
-    sys.path.append('.')
-    from degen_news_sources import get_degen_news, get_trending_degen_coins
-    degen_news_available = True
-    print("✅ Degen News Aggregator loaded successfully")
-except ImportError as e:
-    degen_news_available = False
-    print(f"❌ Degen News Aggregator not available: {e}")
-
-# Discord Multi-Channel Configuration
-DISCORD_WEBHOOKS = {
-    'alerts': os.getenv('DISCORD_ALERTS_WEBHOOK'),        # Breaking news, risks (1398000506068009032)
-    'portfolio': os.getenv('DISCORD_PORTFOLIO_WEBHOOK'),  # Portfolio analysis (1399451217372905584)  
-    'alpha_scans': os.getenv('DISCORD_ALPHA_WEBHOOK'),    # Trading opportunities (1399790636990857277)
-    'degen_memes': os.getenv('DISCORD_DEGEN_WEBHOOK')     # Degen/meme opportunities (1401971493096915067)
+# Discord Bot Configuration (using Discord.py instead of webhooks)
+DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
+DISCORD_CHANNELS = {
+    'alerts': 1398000506068009032,        # Breaking news, risks
+    'portfolio': 1399451217372905584,     # Portfolio analysis  
+    'alpha_scans': 1399790636990857277    # Trading opportunities
 }
 
 # Legacy single webhook support (backward compatible)
@@ -467,37 +448,47 @@ async def fetch_railway_api(endpoint):
         return None
 
 async def send_discord_alert(message, channel='portfolio'):
-    """Send alert to Discord channel via webhook"""
+    """Send alert to Discord channel via bot (create temporary connection)"""
     try:
-        # Get webhook URL
-        webhook_url = DISCORD_WEBHOOKS.get(channel) or LEGACY_DISCORD_WEBHOOK
-        if not webhook_url:
-            print(f"❌ No Discord webhook configured for {channel}")
+        if not DISCORD_TOKEN:
+            print("❌ No Discord token configured")
             return False
         
-        # Channel-specific bot names
-        bot_names = {
-            'alerts': 'Market Alerts Bot',
-            'portfolio': 'Portfolio Analysis Bot',
-            'alpha_scans': 'Alpha Scanner Bot'
-        }
+        # Get channel ID
+        channel_id = DISCORD_CHANNELS.get(channel)
+        if not channel_id:
+            print(f"❌ No Discord channel configured for {channel}")
+            return False
         
-        payload = {
-            "content": message,
-            "username": bot_names.get(channel, "Trading Alerts Bot")
-        }
+        # Create temporary Discord client for this message
+        intents = discord.Intents.default()
+        intents.message_content = True
+        client = discord.Client(intents=intents)
         
-        async with aiohttp.ClientSession() as session:
-            async with session.post(webhook_url, json=payload) as response:
-                if response.status == 204:
-                    print(f"✅ Discord alert sent to #{channel}")
-                    return True
+        @client.event
+        async def on_ready():
+            try:
+                # Get the channel and send message
+                discord_channel = client.get_channel(channel_id)
+                if discord_channel:
+                    await discord_channel.send(message)
+                    print(f"✅ Discord alert sent to #{channel} ({channel_id})")
                 else:
-                    print(f"❌ Discord webhook failed: {response.status}")
-                    return False
+                    print(f"❌ Discord channel {channel_id} not found")
+                
+                # Close the connection
+                await client.close()
+                
+            except Exception as e:
+                print(f"❌ Discord send error: {e}")
+                await client.close()
+        
+        # Start the bot
+        await client.start(DISCORD_TOKEN)
+        return True
                     
     except Exception as e:
-        print(f"❌ Discord send error: {e}")
+        print(f"❌ Discord connection error: {e}")
         return False
 
 def prepare_alert_data(alerts):
@@ -794,30 +785,14 @@ async def run_alpha_analysis():
         market_data = get_general_crypto_news(items=5, sentiment=None)
         market_intelligence = {'intelligence': market_data.get('data', [])} if market_data else None
         
-        # Get degen opportunities if available
-        degen_opportunities = None
-        if degen_news_available:
-            try:
-                degen_data = get_degen_news(limit=8)
-                trending_degen = get_trending_degen_coins(limit=5)
-                degen_opportunities = {
-                    'degen_news': degen_data,
-                    'trending_coins': trending_degen
-                }
-                print("✅ Degen opportunities data fetched")
-            except Exception as degen_e:
-                print(f"⚠️ Degen opportunities fetch failed: {degen_e}")
-                degen_opportunities = None
-        
         # Get AI opportunity analysis if available
         ai_opportunities = None
-        if openai_available and (opportunities or market_intelligence or degen_opportunities):
+        if openai_available and (opportunities or market_intelligence):
             try:
                 scan_data = {
                     'opportunities': opportunities,
                     'market_data': market_intelligence,
                     'bullish_signals': bullish_signals,
-                    'degen_opportunities': degen_opportunities,
                     'timestamp': datetime.now().isoformat()
                 }
                 ai_opportunities = trading_ai.scan_opportunities(scan_data, market_intelligence or {})
@@ -897,41 +872,6 @@ async def run_alpha_analysis():
                 else:
                     alpha_message += f"⚡ **{title}**\n"
                 alpha_message += f"🎯 Early entry opportunity detected\n\n"
-        
-        # Add degen opportunities if available
-        if degen_opportunities:
-            alpha_message += f"🐸 **DEGEN OPPORTUNITIES** 🐸\n"
-            
-            # Add trending degen coins
-            trending = degen_opportunities.get('trending_coins', [])
-            if trending:
-                alpha_message += f"📈 **Trending Coins:**\n"
-                for coin in trending[:3]:  # Top 3 trending
-                    symbol = coin.get('symbol', 'Unknown')
-                    source = coin.get('source_name', 'Unknown')
-                    alpha_message += f"• **{symbol}** - {source}\n"
-                alpha_message += f"\n"
-            
-            # Add degen news highlights
-            degen_news = degen_opportunities.get('degen_news', [])
-            if degen_news:
-                alpha_message += f"📰 **Degen News:**\n"
-                for article in degen_news[:2]:  # Top 2 articles
-                    title = article.get('title', 'Unknown')
-                    source = article.get('source_name', 'Unknown')
-                    tickers = article.get('tickers', [])
-                    
-                    # Truncate title if too long
-                    if len(title) > 60:
-                        title = title[:57] + "..."
-                    
-                    alpha_message += f"• **{title}**\n"
-                    alpha_message += f"  Source: {source}"
-                    
-                    if tickers:
-                        alpha_message += f" | Tickers: {', '.join(tickers[:3])}"
-                    alpha_message += f"\n"
-                alpha_message += f"\n"
         
         # Add AI timeline if available
         if ai_opportunities and 'timeline' in ai_opportunities:
@@ -1081,92 +1021,6 @@ async def send_sundown_digest_backup():
             
     except Exception as e:
         print(f"❌ Backup Sundown Digest error: {e}")
-
-async def send_degen_meme_alerts():
-    """Send dedicated degen/meme coin alerts to #degen-memes channel"""
-    try:
-        print("\n🐸 DEGEN MEME ALERTS - Scanning for meme coin opportunities...")
-        
-        if not degen_news_available:
-            print("❌ Degen news aggregator not available for meme alerts")
-            return
-        
-        # Get degen opportunities using the enhanced DEXScreener integration
-        degen_data = get_degen_news(limit=5)
-        trending_degen = get_trending_degen_coins(limit=5)
-        
-        # Format message for #degen-memes channel
-        meme_message = f"🐸 **DEGEN MEME ALERT** 🐸\n"
-        meme_message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
-        
-        # Add DEXScreener boosted tokens (aligned with API docs)
-        dex_trending = []
-        for item in trending_degen:
-            if item.get('source_type') == 'dexscreener_boosted':
-                dex_trending.append(item)
-        
-        if dex_trending:
-            meme_message += f"🚀 **DEXScreener Boosted Tokens:**\n"
-            for token in dex_trending[:3]:
-                symbol = ', '.join(token.get('tickers', ['UNKNOWN']))
-                boost_amount = token.get('boost_amount', 0)
-                chain = token.get('chain', 'unknown')
-                url = token.get('url', '')
-                
-                if url:
-                    meme_message += f"• **[{symbol}]({url})** - ${boost_amount:.0f} boost on {chain}\n"
-                else:
-                    meme_message += f"• **{symbol}** - ${boost_amount:.0f} boost on {chain}\n"
-            meme_message += f"\n"
-        
-        # Add CoinGecko trending
-        cg_trending = []
-        for item in trending_degen:
-            if item.get('source_type') == 'coingecko_trending':
-                cg_trending.append(item)
-        
-        if cg_trending:
-            meme_message += f"📈 **CoinGecko Trending:**\n"
-            for coin in cg_trending[:3]:
-                symbol = ', '.join(coin.get('tickers', ['UNKNOWN']))
-                meme_message += f"• **{symbol}** - Trending on CoinGecko\n"
-            meme_message += f"\n"
-        
-        # Add meme coin news
-        if degen_data:
-            meme_message += f"📰 **Meme Coin News:**\n"
-            for article in degen_data[:2]:
-                title = article.get('title', 'Unknown')
-                source = article.get('source_name', 'Unknown')
-                tickers = article.get('tickers', [])
-                
-                # Truncate title for Discord
-                if len(title) > 70:
-                    title = title[:67] + "..."
-                
-                meme_message += f"• **{title}**\n"
-                meme_message += f"  {source}"
-                if tickers:
-                    meme_message += f" | {', '.join(tickers[:2])}"
-                meme_message += f"\n"
-            meme_message += f"\n"
-        
-        # Add footer
-        meme_message += f"⏰ Next Degen Scan: "
-        current_hour = datetime.now().hour
-        if current_hour < 8:
-            meme_message += "08:30 UTC"
-        elif current_hour < 15:
-            meme_message += "15:30 UTC"
-        else:
-            meme_message += "22:30 UTC"
-        
-        # Send to dedicated degen-memes channel
-        await send_discord_alert(meme_message, 'degen_memes')
-        print("✅ Degen meme alerts sent to Discord #degen-memes channel")
-        
-    except Exception as e:
-        print(f"❌ Degen meme alerts error: {e}")
 
 async def check_breaking_alerts():
     """Check for breaking news every 15 minutes with AI analysis - only sends if urgent"""
@@ -1565,11 +1419,6 @@ def main():
     # Alpha scans twice daily (9 AM and 9 PM)
     schedule.every().day.at("09:00").do(lambda: asyncio.run(run_alpha_analysis()))
     schedule.every().day.at("21:00").do(lambda: asyncio.run(run_alpha_analysis()))
-    
-    # Degen meme alerts to dedicated channel (3 times daily)
-    schedule.every().day.at("08:30").do(lambda: asyncio.run(send_degen_meme_alerts()))
-    schedule.every().day.at("15:30").do(lambda: asyncio.run(send_degen_meme_alerts()))
-    schedule.every().day.at("22:30").do(lambda: asyncio.run(send_degen_meme_alerts()))
     
     # Breaking news alerts check every 15 minutes (only sends if urgent)
     schedule.every(15).minutes.do(lambda: asyncio.run(check_breaking_alerts()))
