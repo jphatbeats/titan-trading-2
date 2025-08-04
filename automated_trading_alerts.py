@@ -522,15 +522,36 @@ async def fetch_dexscreener_trending():
     """Fetch trending tokens from DexScreener API for real degen plays"""
     try:
         async with aiohttp.ClientSession() as session:
-            # Get trending pairs from DexScreener
-            url = "https://api.dexscreener.com/latest/dex/tokens/trending"
-            async with session.get(url) as response:
+            # Get boosted tokens (trending with social momentum)
+            boosted_url = "https://api.dexscreener.com/token-boosts/latest/v1"
+            async with session.get(boosted_url, timeout=10) as response:
                 if response.status == 200:
-                    data = await response.json()
-                    print(f"✅ DexScreener trending data fetched: {len(data.get('pairs', []))} pairs")
-                    return data
+                    boosted_data = await response.json()
+                    print(f"✅ DexScreener boosted tokens fetched: {len(boosted_data)} tokens")
+                    
+                    # Also get top boosted for maximum momentum
+                    top_boosted_url = "https://api.dexscreener.com/token-boosts/top/v1"
+                    async with session.get(top_boosted_url, timeout=10) as response2:
+                        if response2.status == 200:
+                            top_boosted_data = await response2.json()
+                            print(f"✅ DexScreener top boosted fetched: {len(top_boosted_data)} tokens")
+                            
+                            return {
+                                'latest_boosted': boosted_data,
+                                'top_boosted': top_boosted_data,
+                                'type': 'boosted_trending'
+                            }
+                        else:
+                            return {'latest_boosted': boosted_data, 'type': 'latest_only'}
                 else:
-                    print(f"❌ DexScreener API error: {response.status}")
+                    print(f"❌ DexScreener boosted API error: {response.status}")
+                    # Fallback to token profiles for new launches
+                    profiles_url = "https://api.dexscreener.com/token-profiles/latest/v1"
+                    async with session.get(profiles_url, timeout=10) as response3:
+                        if response3.status == 200:
+                            profiles_data = await response3.json()
+                            print(f"✅ DexScreener profiles fallback: {len(profiles_data)} new tokens")
+                            return {'latest_profiles': profiles_data, 'type': 'new_launches'}
                     return None
     except Exception as e:
         print(f"❌ DexScreener fetch error: {e}")
@@ -1073,9 +1094,9 @@ async def run_degen_memes_scan():
         if lunarcrush_data and lunarcrush_data.get('trending_coins'):
             trending_coins = [coin for coin in lunarcrush_data['trending_coins'] if coin not in major_coins]
         
-        # Get AI analysis for degen opportunities
+        # Get AI analysis for degen opportunities (run even with limited data)
         ai_degen_analysis = None
-        if openai_available and (viral_plays or trending_coins):
+        if openai_available:
             try:
                 degen_scan_data = {
                     'viral_plays': viral_plays,
@@ -1086,7 +1107,8 @@ async def run_degen_memes_scan():
                     'risk_tolerance': 'very_high',
                     'major_coins_excluded': major_coins,
                     'focus': 'new_launches_and_meme_coins_only',
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': datetime.now().isoformat(),
+                    'fallback_analysis': viral_plays is None and not trending_coins
                 }
                 ai_degen_analysis = trading_ai.scan_degen_opportunities(degen_scan_data)
                 print("✅ AI degen analysis completed")
@@ -1101,11 +1123,21 @@ async def run_degen_memes_scan():
         if ai_degen_analysis and not ai_degen_analysis.get('error'):
             degen_message += f"🤖 **AI DEGEN ANALYSIS:**\n"
             
-            # High risk/high reward setups
+            # High risk/high reward setups (clean formatting)
             if 'viral_opportunities' in ai_degen_analysis:
                 viral_opps = ai_degen_analysis['viral_opportunities'][:3]
                 for i, opp in enumerate(viral_opps, 1):
-                    degen_message += f"💎 {i}. {opp}\n"
+                    if isinstance(opp, dict):
+                        token = opp.get('token', 'Unknown')
+                        desc = opp.get('description', 'Viral opportunity')[:50]
+                        url = opp.get('url', '').rstrip(',')  # Remove trailing comma
+                        if url:
+                            degen_message += f"💎 {i}. **[{token}]({url})** - {desc}\n"
+                        else:
+                            degen_message += f"💎 {i}. **{token}** - {desc}\n"
+                    else:
+                        # Handle string format
+                        degen_message += f"💎 {i}. {str(opp)[:60]}\n"
             
             # Risk warning (important for degen plays)
             if 'risk_warning' in ai_degen_analysis:
@@ -1141,19 +1173,75 @@ async def run_degen_memes_scan():
                     degen_message += f"\n"
                     viral_count += 1
         
-        # DexScreener trending (actual new/viral tokens)
-        if dex_trending and dex_trending.get('pairs'):
-            degen_message += f"🔥 **DEXSCREENER HOT:**\n"
-            for pair in dex_trending['pairs'][:4]:
-                token_name = pair.get('baseToken', {}).get('name', 'Unknown')
-                symbol = pair.get('baseToken', {}).get('symbol', '')
-                price_change = pair.get('priceChange', {}).get('h24', 0)
-                volume = pair.get('volume', {}).get('h24', 0)
+        # DexScreener boosted tokens (viral momentum plays)
+        dex_count = 0
+        if dex_trending:
+            if dex_trending.get('latest_boosted'):
+                degen_message += f"🔥 **DEXSCREENER BOOSTED (VIRAL MOMENTUM):**\n"
+                boosted_tokens = dex_trending['latest_boosted'][:6]  # Top 6 boosted
                 
-                if price_change > 50:  # Only show big movers
-                    change_emoji = "🚀" if price_change > 100 else "📈"
-                    degen_message += f"{change_emoji} **${symbol}** ({token_name}) +{price_change:.1f}% | Vol: ${volume:,.0f}\n"
-            degen_message += f"\n"
+                for token in boosted_tokens:
+                    try:
+                        description = token.get('description', 'New viral token')
+                        # Truncate description  
+                        if len(description) > 60:
+                            description = description[:60] + '...'
+                        
+                        boost_amount = token.get('amount', 0)
+                        chain_id = token.get('chainId', 'multi')
+                        
+                        # Extract token info from URL and token address
+                        token_url = token.get('url', '')
+                        token_address = token.get('tokenAddress', '')
+                        chain_id = token.get('chainId', 'solana')
+                        
+                        # Try to extract symbol from description first, then URL
+                        description_text = description.upper()
+                        
+                        # Look for common token patterns in description
+                        import re
+                        symbol_match = re.search(r'\b([A-Z]{2,10})\b', description_text)
+                        if symbol_match and symbol_match.group(1) not in ['OFFICIAL', 'TOKEN', 'COIN', 'NEW', 'THE']:
+                            token_name = symbol_match.group(1)
+                        elif token_address:
+                            # Use first 6 chars of token address as fallback
+                            token_name = token_address[:6].upper()
+                        else:
+                            token_name = 'NEW'
+                        
+                        # Clean URL (remove trailing comma if present)
+                        clean_url = token_url.rstrip(',')
+                        
+                        # Format token entry with clickable link
+                        degen_message += f"🚀 **[${token_name}]({clean_url})** - {description}\n"
+                        degen_message += f"   💰 Boost: ${boost_amount} | Chain: {chain_id}\n"
+                        dex_count += 1
+                    except Exception as token_error:
+                        continue  # Skip problematic tokens
+                
+                if dex_count == 0:
+                    degen_message += "⚠️ No boosted tokens with clear momentum today\n"
+                degen_message += f"\n"
+                
+            elif dex_trending.get('latest_profiles'):
+                degen_message += f"🆕 **NEW TOKEN LAUNCHES:**\n"
+                profiles = dex_trending['latest_profiles'][:4]  # Top 4 new launches
+                
+                for profile in profiles:
+                    try:
+                        description = profile.get('description', 'New project launching')
+                        if len(description) > 50:
+                            description = description[:50] + '...'
+                        
+                        chain_id = profile.get('chainId', 'multi')
+                        
+                        degen_message += f"💎 **New Launch** - {description}\n"
+                        degen_message += f"   🔗 Chain: {chain_id}\n"
+                        dex_count += 1
+                    except Exception as profile_error:
+                        continue
+                
+                degen_message += f"\n"
         
         # Social trending (Small caps only)
         if trending_coins:
