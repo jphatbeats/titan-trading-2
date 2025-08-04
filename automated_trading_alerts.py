@@ -26,6 +26,19 @@ except ImportError as e:
     crypto_news_available = False
     print(f"❌ Crypto news API not available: {e}")
 
+# Import OpenAI trading intelligence
+try:
+    from openai_trading_intelligence import TradingIntelligence
+    trading_ai = TradingIntelligence()
+    openai_available = True
+    print("✅ OpenAI Trading Intelligence loaded successfully")
+except ImportError as e:
+    openai_available = False
+    print(f"❌ OpenAI Trading Intelligence not available: {e}")
+except Exception as e:
+    openai_available = False
+    print(f"❌ OpenAI initialization error: {e}")
+
 # Discord Multi-Channel Configuration
 DISCORD_WEBHOOKS = {
     'alerts': os.getenv('DISCORD_ALERTS_WEBHOOK'),        # Breaking news, risks (1398000506068009032)
@@ -624,9 +637,9 @@ def save_alerts_for_bot(alerts):
 
 
 async def run_portfolio_analysis():
-    """Hourly portfolio analysis for #portfolio channel"""
+    """Hourly portfolio analysis for #portfolio channel with AI insights"""
     try:
-        print("\n📊 PORTFOLIO ANALYSIS - Running hourly check...")
+        print("\n📊 PORTFOLIO ANALYSIS - Running AI-powered hourly check...")
         
         # Get live position data from Railway API
         positions = await fetch_live_positions()
@@ -642,6 +655,20 @@ async def run_portfolio_analysis():
         rsi_alerts = analyze_trading_conditions(positions)
         alerts.extend(rsi_alerts)
         
+        # Get AI-powered portfolio analysis if available
+        ai_insights = None
+        if openai_available and positions:
+            try:
+                portfolio_data = {
+                    'positions': positions,
+                    'alerts': alerts,
+                    'timestamp': datetime.now().isoformat()
+                }
+                ai_insights = trading_ai.analyze_portfolio(portfolio_data)
+                print("✅ AI portfolio insights generated")
+            except Exception as ai_e:
+                print(f"⚠️ AI analysis failed, continuing with traditional analysis: {ai_e}")
+        
         # Get portfolio-specific news using direct CryptoNews API
         if crypto_news_available:
             from crypto_news_alerts import get_portfolio_symbols, get_advanced_ticker_news
@@ -653,11 +680,33 @@ async def run_portfolio_analysis():
         else:
             portfolio_news = None
         
-        # Format portfolio message
-        if alerts or (portfolio_news and portfolio_news.get('data')):
-            portfolio_message = f"📊 **PORTFOLIO UPDATE** 📊\n\n"
+        # Format enhanced portfolio message with AI insights
+        if alerts or ai_insights or (portfolio_news and portfolio_news.get('data')):
+            portfolio_message = f"🤖 **AI PORTFOLIO ANALYSIS** 🤖\n\n"
             
-            # Add trading signals
+            # Add AI insights first if available
+            if ai_insights and not ai_insights.get('error'):
+                portfolio_message += f"🧠 **AI ASSESSMENT:**\n"
+                
+                # Overall assessment
+                if 'overall_assessment' in ai_insights:
+                    score = ai_insights['overall_assessment']
+                    portfolio_message += f"📊 Portfolio Health: {score}/10\n"
+                
+                # Risk level
+                if 'risk_level' in ai_insights:
+                    risk = ai_insights['risk_level']
+                    portfolio_message += f"⚠️ Risk Level: {risk}\n"
+                
+                # Top recommendations
+                if 'recommendations' in ai_insights:
+                    recs = ai_insights['recommendations'][:2]  # Top 2
+                    for i, rec in enumerate(recs, 1):
+                        portfolio_message += f"💡 {i}. {rec}\n"
+                
+                portfolio_message += f"\n"
+            
+            # Add traditional trading signals
             if alerts:
                 portfolio_message += f"🎯 **TRADING SIGNALS:**\n"
                 for alert in alerts[:3]:
@@ -685,7 +734,7 @@ async def run_portfolio_analysis():
                     portfolio_message += f"\n\n"
             
             await send_discord_alert(portfolio_message, 'portfolio')
-            print("✅ Portfolio analysis sent to Discord")
+            print("✅ AI-enhanced portfolio analysis sent to Discord")
         else:
             print("📊 No significant portfolio updates to report")
             
@@ -693,9 +742,9 @@ async def run_portfolio_analysis():
         print(f"❌ Portfolio analysis error: {e}")
 
 async def run_alpha_analysis():
-    """Twice daily comprehensive alpha analysis for #alpha-scans channel"""
+    """Twice daily comprehensive AI-powered alpha analysis for #alpha-scans channel"""
     try:
-        print("\n🎯 ALPHA ANALYSIS - Running comprehensive scan...")
+        print("\n🎯 ALPHA ANALYSIS - Running AI-powered comprehensive scan...")
         
         if not crypto_news_available:
             # Fallback message when crypto news module not available
@@ -724,8 +773,40 @@ async def run_alpha_analysis():
         market_data = get_general_crypto_news(items=5, sentiment=None)
         market_intelligence = {'intelligence': market_data.get('data', [])} if market_data else None
         
-        alpha_message = f"🎯 **ALPHA SCAN REPORT** 🎯\n"
+        # Get AI opportunity analysis if available
+        ai_opportunities = None
+        if openai_available and (opportunities or market_intelligence):
+            try:
+                scan_data = {
+                    'opportunities': opportunities,
+                    'market_data': market_intelligence,
+                    'bullish_signals': bullish_signals,
+                    'timestamp': datetime.now().isoformat()
+                }
+                ai_opportunities = trading_ai.scan_opportunities(scan_data, market_intelligence or {})
+                print("✅ AI opportunity scan completed")
+            except Exception as ai_e:
+                print(f"⚠️ AI opportunity scan failed: {ai_e}")
+        
+        # Format comprehensive AI-enhanced alpha scan message
+        alpha_message = f"🤖 **AI ALPHA SCAN REPORT** 🤖\n"
         alpha_message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}\n\n"
+        
+        # Add AI opportunity insights first if available
+        if ai_opportunities and not ai_opportunities.get('error'):
+            alpha_message += f"🧠 **AI OPPORTUNITY ANALYSIS:**\n"
+            
+            # High probability setups
+            if 'high_probability_setups' in ai_opportunities:
+                setups = ai_opportunities['high_probability_setups'][:2]  # Top 2
+                for i, setup in enumerate(setups, 1):
+                    alpha_message += f"⭐ {i}. {setup}\n"
+            
+            # Risk/reward analysis
+            if 'risk_reward_analysis' in ai_opportunities:
+                alpha_message += f"📊 Risk/Reward: {ai_opportunities['risk_reward_analysis']}\n"
+            
+            alpha_message += f"\n"
         
         # Trading opportunities
         if opportunities and opportunities.get('opportunities'):
@@ -780,12 +861,16 @@ async def run_alpha_analysis():
                     alpha_message += f"⚡ **{title}**\n"
                 alpha_message += f"🎯 Early entry opportunity detected\n\n"
         
+        # Add AI timeline if available
+        if ai_opportunities and 'timeline' in ai_opportunities:
+            alpha_message += f"⏱️ **Expected Timeline**: {ai_opportunities['timeline']}\n\n"
+        
         # Add footer with next scan time
         next_scan = "09:00 UTC" if datetime.now().hour >= 21 or datetime.now().hour < 9 else "21:00 UTC"
-        alpha_message += f"⏰ Next Alpha Scan: {next_scan}"
+        alpha_message += f"⏰ Next AI Alpha Scan: {next_scan}"
         
         await send_discord_alert(alpha_message, 'alpha_scans')
-        print("✅ Alpha analysis sent to Discord")
+        print("✅ AI-enhanced alpha analysis sent to Discord")
         
     except Exception as e:
         print(f"❌ Alpha analysis error: {e}")
@@ -926,9 +1011,9 @@ async def send_sundown_digest_backup():
         print(f"❌ Backup Sundown Digest error: {e}")
 
 async def check_breaking_alerts():
-    """Check for breaking news every 15 minutes - only sends if urgent"""
+    """Check for breaking news every 15 minutes with AI analysis - only sends if urgent"""
     try:
-        print("\n🚨 Checking for breaking alerts...")
+        print("\n🚨 Checking for AI-enhanced breaking alerts...")
         
         # Get high priority alerts only
         priority_alerts = await fetch_railway_api("/api/alerts/prioritized?limit=5&urgency=HIGH")
@@ -949,8 +1034,34 @@ async def check_breaking_alerts():
                 breaking_alerts.append(alert)
         
         if breaking_alerts:
-            alert_message = f"🚨 **BREAKING ALERT** 🚨\n\n"
+            # Get AI analysis of breaking alerts if available
+            ai_alert_analysis = None
+            if openai_available:
+                try:
+                    ai_alert_analysis = trading_ai.analyze_alerts_for_discord(breaking_alerts)
+                    print("✅ AI breaking alert analysis generated")
+                except Exception as ai_e:
+                    print(f"⚠️ AI alert analysis failed: {ai_e}")
             
+            alert_message = f"🤖 **AI BREAKING ALERT** 🤖\n\n"
+            
+            # Add AI insights first if available
+            if ai_alert_analysis and not ai_alert_analysis.get('error'):
+                urgency_level = ai_alert_analysis.get('urgency_level', 'MEDIUM')
+                key_insight = ai_alert_analysis.get('key_insight', '')
+                action_rec = ai_alert_analysis.get('action_recommendation', '')
+                
+                # Urgency indicator
+                urgency_emoji = "🔴" if urgency_level == "HIGH" else "🟡" if urgency_level == "MEDIUM" else "🟢"
+                alert_message += f"{urgency_emoji} **AI ASSESSMENT: {urgency_level} URGENCY**\n"
+                
+                if key_insight:
+                    alert_message += f"🧠 {key_insight}\n"
+                if action_rec:
+                    alert_message += f"💡 Action: {action_rec}\n"
+                alert_message += f"\n"
+            
+            # Add breaking news items
             for alert in breaking_alerts[:2]:  # Max 2 breaking alerts
                 title = alert.get('title', 'Breaking news')
                 url = alert.get('url', alert.get('link', ''))
@@ -969,7 +1080,7 @@ async def check_breaking_alerts():
                 alert_message += f"\n\n"
             
             await send_discord_alert(alert_message, 'alerts')
-            print(f"🚨 Breaking alert sent: {len(breaking_alerts)} urgent items")
+            print(f"🚨 AI-enhanced breaking alert sent: {len(breaking_alerts)} urgent items")
         else:
             print("🔍 No breaking alerts meet urgency criteria")
             
@@ -1264,11 +1375,12 @@ def main():
     """Main function with hourly scheduling"""
     print("🚀 AUTOMATED TRADING ALERTS SYSTEM")
     print("=" * 50)
-    print("📊 MULTI-CHANNEL DISCORD INTEGRATION:")
-    print("  🚨 #alerts: Breaking news, risk alerts & Sundown Digest")
-    print("  📊 #portfolio: Hourly analysis & trading signals")
-    print("  🎯 #alpha-scans: Comprehensive reports (9AM & 9PM)")
+    print("🤖 AI-ENHANCED MULTI-CHANNEL DISCORD INTEGRATION:")
+    print("  🚨 #alerts: AI breaking news analysis & Sundown Digest")
+    print("  📊 #portfolio: AI portfolio health & trading signals")
+    print("  🎯 #alpha-scans: AI opportunity scans (9AM & 9PM)")
     print("  🌅 Sundown Digest: Mon-Fri 7:00 PM ET market wrap-up")
+    print("  🧠 All channels powered by OpenAI GPT-4o intelligence")
     print("=" * 50)
     print("📈 Features:")
     print("  • RSI Analysis (Overbought > 72, Oversold < 28)")
