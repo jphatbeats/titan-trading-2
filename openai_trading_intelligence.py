@@ -70,6 +70,57 @@ class TradingIntelligence:
                 'timestamp': datetime.now().isoformat()
             }
 
+    def analyze_alerts_for_discord(self, alerts: List[Dict], portfolio_data: Dict = None) -> Dict:
+        """Generate AI insights for Discord alerts"""
+        try:
+            alert_summary = "\n".join([f"- {alert.get('message', alert.get('type', 'Alert'))}" for alert in alerts[:5]])
+            
+            prompt = f"""
+            As a crypto trading expert, analyze these trading alerts and provide Discord-ready insights:
+
+            Current Alerts:
+            {alert_summary}
+
+            Portfolio Context:
+            {json.dumps(portfolio_data, indent=2) if portfolio_data else 'No portfolio data available'}
+
+            Provide response in JSON format with:
+            1. urgency_level: LOW/MEDIUM/HIGH based on alert severity
+            2. key_insight: One sentence summary of main concern/opportunity
+            3. action_recommendation: Specific next step for trader
+            4. risk_warning: Any immediate risks to highlight
+            5. opportunity_flag: Any opportunities detected
+            6. confidence_score: Your confidence in analysis (1-10)
+
+            Keep responses concise for Discord format (under 200 chars per field).
+            """
+
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are a crypto trading expert providing concise Discord-ready analysis."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.5,
+                max_tokens=800
+            )
+
+            analysis = json.loads(response.choices[0].message.content or "{}")
+            analysis['timestamp'] = datetime.now().isoformat()
+            analysis['ai_powered'] = True
+            analysis['analysis_type'] = 'discord_alert_analysis'
+            
+            return analysis
+
+        except Exception as e:
+            logger.error(f"Discord alert analysis error: {e}")
+            return {
+                'error': 'AI alert analysis temporarily unavailable',
+                'fallback_insight': 'Trading alerts detected - review manually',
+                'timestamp': datetime.now().isoformat()
+            }
+
     def grade_news_sentiment(self, news_articles: List[Dict]) -> Dict:
         """Grade news articles for market sentiment impact"""
         try:
