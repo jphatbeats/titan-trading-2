@@ -330,29 +330,46 @@ class TradingIntelligence:
             }
 
     def scan_opportunities(self, market_data: Dict, news_data: Dict) -> Dict:
-        """AI-powered opportunity scanner for new trades"""
+        """AI-powered opportunity scanner for new trades with accurate pricing"""
         try:
+            # Extract real-time market data if available
+            real_time_data = market_data.get('real_time_market_data', {})
+            
             prompt = f"""
-            As an opportunity scout, identify trading opportunities:
+            As a professional crypto trading analyst, analyze this comprehensive market data to identify high-probability trading opportunities:
 
-            Market Data:
-            {json.dumps(market_data, indent=2)}
+            REAL-TIME MARKET DATA (includes current prices, OHLCV, volume, technical indicators):
+            {json.dumps(real_time_data, indent=2)}
 
-            Recent News:
+            NEWS & SENTIMENT DATA:
             {json.dumps(news_data, indent=2)}
 
-            Identify JSON opportunities with:
-            1. high_probability_setups: Best trading setups right now
-            2. breakout_candidates: Assets near key breakout levels
-            3. value_opportunities: Oversold quality assets
-            4. momentum_plays: Assets with strong momentum
-            5. news_driven_trades: Opportunities from recent news
-            6. risk_reward_analysis: Risk/reward ratio for each opportunity
-            7. entry_strategies: Specific entry methods for each
-            8. timeline: Expected timeframe for each opportunity
-            9. stop_loss_levels: Risk management for each trade
+            ADDITIONAL MARKET INTELLIGENCE:
+            {json.dumps(market_data.get('opportunities', {}), indent=2)}
 
-            Rank opportunities by probability of success.
+            **CRITICAL**: Use ONLY the real-time price data from REAL-TIME MARKET DATA section for all price calculations, entry/exit suggestions, and technical analysis.
+
+            Provide comprehensive JSON analysis with:
+            1. high_probability_setups: Top 3 trading setups with specific entry prices (use EXACT current prices from real-time data)
+            2. entry_price_analysis: Exact entry prices based on current market data
+            3. target_levels: Realistic profit targets based on technical levels and recent price action
+            4. stop_loss_recommendations: Precise stop loss levels using current support/resistance
+            5. risk_reward_ratios: Calculated risk/reward for each trade
+            6. volume_confirmation: Volume analysis supporting each trade setup
+            7. technical_signals: RSI, momentum, breakout patterns from the data
+            8. news_catalysts: How recent news supports each trading opportunity
+            9. timeline_expectations: Realistic timeframes for each trade
+            10. position_sizing_suggestions: Recommended position sizes based on volatility
+
+            **CRITICAL REQUIREMENTS**:
+            - All prices must be based on the real-time market data provided
+            - Include specific entry prices, not ranges  
+            - Calculate realistic targets based on recent price action and volatility
+            - Provide exact stop loss levels
+            - NEWS DATES: All news data is from TODAY or last 24 hours - these are FRESH, current opportunities
+            - SOCIAL DATA: LunarCrush data shows real-time social sentiment and trending coins
+            - Justify each trade with technical and fundamental reasoning
+            - Ignore any news older than 48 hours
             """
 
             response = self.client.chat.completions.create(
