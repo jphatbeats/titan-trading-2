@@ -406,37 +406,52 @@ class TradingIntelligence:
             trending_social = degen_data.get('trending_social', [])
             lunarcrush_data = degen_data.get('lunarcrush_data', {})
             
+            viral_plays = degen_data.get('viral_plays', {})
+            trending_social = degen_data.get('trending_social', [])
+            dex_trending = degen_data.get('dex_trending', {})
+            major_coins_excluded = degen_data.get('major_coins_excluded', [])
+            
             prompt = f"""
-            As a degenerate crypto trader expert in viral plays, meme coins, and high-risk opportunities, analyze this data for explosive short-term plays:
+            As a degenerate crypto trader expert in NEW LAUNCHES, meme coins, and viral plays, analyze this data for explosive opportunities.
 
-            VIRAL CONTENT & NEWS:
+            CRITICAL: IGNORE ALL MAJOR COINS LIKE BTC, ETH, SOL, ADA, MATIC, AVAX, DOT, LINK, UNI, ATOM. 
+            Focus ONLY on new tokens, meme coins, micro caps, and viral plays under $100M market cap.
+
+            VIRAL CONTENT & NEWS (New tokens only):
             {json.dumps(viral_plays, indent=2)}
 
-            SOCIALLY TRENDING COINS:
+            DEXSCREENER TRENDING (New/Small cap tokens):
+            {json.dumps(dex_trending, indent=2)}
+
+            SOCIAL TRENDING (Exclude major coins):
             {json.dumps(trending_social, indent=2)}
 
-            LUNARCRUSH SOCIAL DATA:
-            {json.dumps(lunarcrush_data, indent=2)}
+            EXCLUDED MAJOR COINS (DO NOT MENTION THESE):
+            {json.dumps(major_coins_excluded, indent=2)}
 
-            **DEGEN FOCUS**: Look for airdrops, meme coins, viral content, social media buzz, and explosive short-term opportunities.
+            **STRICT DEGEN FOCUS**: 
+            - NEW token launches (less than 30 days old)
+            - Meme coins with viral potential 
+            - Micro-cap gems under $10M market cap
+            - Tokens with explosive social growth
+            - DeFi protocol tokens gaining traction
+            - Trending on CT (Crypto Twitter)
 
-            Provide high-risk JSON analysis with:
-            1. viral_opportunities: Top 3 viral plays with maximum upside potential (focus on memes, trends, social buzz)
-            2. airdrop_alerts: Any airdrops or free token opportunities mentioned
-            3. social_momentum: Coins with explosive social media growth
-            4. meme_potential: Tokens with viral meme potential
-            5. risk_warning: Clear warning about extremely high risk nature
-            6. entry_strategy: Quick entry/exit strategies for volatile plays
-            7. position_sizing: Micro position recommendations (1-2% max)
-            8. timeline: Expected timeframes for viral plays (usually hours/days)
-            9. degen_score: Risk level from 1-10 (10 being maximum degen)
+            Provide JSON analysis with:
+            1. viral_opportunities: Top 3 NEW/SMALL tokens with viral potential (NO major coins)
+            2. new_launches: Recently launched tokens with momentum
+            3. meme_potential: Tokens with meme/viral characteristics
+            4. micro_caps: Very small market cap gems
+            5. risk_warning: "EXTREME RISK - New tokens can go to zero instantly"
+            6. entry_strategy: "Micro positions only - max 0.5% portfolio per token"
+            7. timeline: "Hours to days for viral plays"
+            8. degen_score: Always 9-10 for new/micro tokens
 
-            **DEGEN REQUIREMENTS**:
-            - Focus on viral potential over fundamentals
-            - Emphasize speed and social momentum
-            - Recommend tiny position sizes due to extreme risk
-            - Include specific risk warnings for each play
-            - Look for trending hashtags, social buzz, community growth
+            **REQUIREMENTS**:
+            - If no small/new tokens found, say "No degen opportunities detected today"
+            - Never recommend established coins (>$1B market cap)
+            - Focus on tokens trading on DEXs, not major exchanges
+            - Look for community-driven tokens, not VC-backed projects
             """
             
             response = self.client.chat.completions.create(
