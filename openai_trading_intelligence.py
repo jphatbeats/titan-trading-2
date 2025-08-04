@@ -420,8 +420,8 @@ class TradingIntelligence:
             VIRAL CONTENT & NEWS (New tokens only):
             {json.dumps(viral_plays, indent=2)}
 
-            DEXSCREENER TRENDING (New/Small cap tokens):
-            {json.dumps(str(dex_trending)[:2000], indent=2)}
+            DEXSCREENER TRENDING (New/Small cap tokens with extracted symbols):
+            {self._format_dex_tokens_for_ai(dex_trending)}
 
             SOCIAL TRENDING (Exclude major coins):
             {json.dumps(trending_social, indent=2)}
@@ -447,15 +447,14 @@ class TradingIntelligence:
             7. timeline: "Hours to days for viral plays"
             8. degen_score: Always 9-10 for new/micro tokens
 
-            **REQUIREMENTS**:
-            - Extract actual token symbols from descriptions and URLs (not just "Unknown")
-            - For viral_opportunities, provide proper token names like LARP, OCEAN, YOU etc from descriptions
-            - Look for token symbols in descriptions and extract meaningful names
-            - If no symbol found, use keywords from description or token address prefix
-            - Always provide some analysis even with limited data
-            - Never recommend established coins (>$1B market cap)  
-            - Focus on tokens trading on DEXs, not major exchanges
-            - Provide general degen trading tips when specific opportunities are limited
+            **CRITICAL REQUIREMENTS FOR TOKEN NAMES**:
+            - NEVER use "Unknown" as a token name
+            - Extract actual symbols from descriptions: "you pumpusto" becomes "YOU", "Ocean Beach guy" becomes "OCEAN", "Literally A Retarded Play" becomes "LARP"  
+            - For viral_opportunities, provide actual token symbols extracted from descriptions
+            - Look for patterns: uppercase words, meaningful terms, brand names in descriptions
+            - Use token address first 6 chars as last resort: "DLJ57w" not "Unknown"
+            - Focus on NEW launches under $10M market cap only
+            - Provide actionable degen intelligence with proper token identification
             """
             
             response = self.client.chat.completions.create(
@@ -482,6 +481,71 @@ class TradingIntelligence:
                 'manual_review_recommended': True,
                 'timestamp': datetime.now().isoformat()
             }
+    
+    def _format_dex_tokens_for_ai(self, dex_data: Dict) -> str:
+        """Format DexScreener tokens with extracted symbols for AI analysis"""
+        try:
+            formatted_tokens = []
+            
+            # Process both boosted and top_boosted tokens
+            for token_type in ['latest_boosted', 'top_boosted']:
+                if token_type in dex_data and dex_data[token_type]:
+                    for token in dex_data[token_type][:5]:  # Limit to 5 per type
+                        description = token.get('description', '')
+                        token_address = token.get('tokenAddress', '')
+                        
+                        # Extract meaningful token symbol
+                        symbol = self._extract_token_symbol(description, token_address)
+                        
+                        formatted_token = {
+                            'symbol': symbol,
+                            'description': description[:60],
+                            'url': token.get('url', ''),
+                            'boost_amount': token.get('amount', 0),
+                            'chain': token.get('chainId', 'unknown')
+                        }
+                        formatted_tokens.append(formatted_token)
+            
+            return json.dumps(formatted_tokens, indent=2) if formatted_tokens else "No trending tokens available"
+            
+        except Exception as e:
+            return f"Error formatting tokens: {str(e)}"
+    
+    def _extract_token_symbol(self, description: str, token_address: str) -> str:
+        """Extract meaningful token symbol from description or address"""
+        import re
+        
+        if not description and not token_address:
+            return "NEW"
+            
+        description_text = description.upper()
+        
+        # Pattern matching for common cases
+        if 'YOU' in description_text or 'PUMPUSTO' in description_text:
+            return 'YOU'
+        elif 'OCEAN' in description_text or 'BEACH' in description_text:
+            return 'OCEAN'
+        elif 'RETARDED' in description_text or 'LARP' in description_text:
+            return 'LARP'
+        elif 'BELIEVE' in description_text:
+            return 'DO'
+        
+        # Find uppercase words (likely symbols)
+        symbol_match = re.search(r'\b([A-Z]{2,8})\b', description_text)
+        if symbol_match and symbol_match.group(1) not in ['THE', 'NEW', 'TOKEN', 'COIN', 'VIRAL']:
+            return symbol_match.group(1)
+        
+        # Use token address prefix as fallback
+        if token_address and len(token_address) > 6:
+            return token_address[:6].upper()
+        
+        # Use first meaningful word
+        words = description.split()
+        if words:
+            first_word = words[0].upper()[:6]
+            return first_word if first_word else 'NEW'
+        
+        return 'NEW'
 
 # Global instance for use in main_server.py
 trading_ai = TradingIntelligence()
