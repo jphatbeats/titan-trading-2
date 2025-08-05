@@ -20,6 +20,15 @@ except ImportError:
 # All news intelligence functionality moved to https://cryptonews-api.com direct calls
 crypto_news_available = False  # Wrapper system deprecated
 
+# BingX Direct API integration for accurate pricing
+try:
+    from bingx_direct_api import bingx_direct
+    bingx_direct_available = True
+    print("✅ BingX Direct API loaded successfully")
+except ImportError as e:
+    bingx_direct_available = False
+    print(f"❌ BingX Direct API failed to load: {e}")
+
 try:
     from error_handler import handle_exchange_error, ExchangeNotAvailableError
 except ImportError:
@@ -512,25 +521,82 @@ def get_blofin_positions():
 
 @app.route('/api/live/market-data/<symbol>', methods=['GET'])
 def get_live_market_data(symbol):
-    """Get live market data for a specific symbol"""
+    """Get live market data for a specific symbol with market type specification"""
     try:
+        # Get optional market type parameter (spot, futures, both)
+        market_type = request.args.get('market_type', 'spot').lower()
+        
         result = {
             'timestamp': datetime.now().isoformat(),
             'symbol': symbol,
+            'market_type_requested': market_type,
             'market_data': {}
         }
         
         for exchange_name in ['bingx', 'blofin']:
             try:
                 if exchange_name in exchange_manager.get_available_exchanges():
-                    ticker = trading_functions.get_ticker(exchange_name, symbol)
-                    orderbook = trading_functions.get_orderbook(exchange_name, symbol, 10)
-                    
-                    result['market_data'][exchange_name] = {
+                    exchange_data = {
                         'status': 'success',
-                        'ticker': ticker,
-                        'orderbook': orderbook
+                        'markets': {}
                     }
+                    
+                    # For BingX, get both spot and futures if available
+                    if exchange_name == 'bingx':
+                        spot_symbol = symbol  # BTC/USDT
+                        futures_symbol = f"{symbol}:USDT"  # BTC/USDT:USDT
+                        
+                        # Get spot market data
+                        if market_type in ['spot', 'both']:
+                            try:
+                                spot_ticker = trading_functions.get_ticker(exchange_name, spot_symbol)
+                                spot_orderbook = trading_functions.get_orderbook(exchange_name, spot_symbol, 5)
+                                exchange_data['markets']['spot'] = {
+                                    'symbol': spot_symbol,
+                                    'ticker': spot_ticker,
+                                    'orderbook': spot_orderbook,
+                                    'price': spot_ticker.get('last'),
+                                    'bid': spot_ticker.get('bid'),
+                                    'ask': spot_ticker.get('ask')
+                                }
+                            except Exception as spot_error:
+                                exchange_data['markets']['spot'] = {
+                                    'symbol': spot_symbol,
+                                    'error': str(spot_error)
+                                }
+                        
+                        # Get futures market data
+                        if market_type in ['futures', 'both']:
+                            try:
+                                futures_ticker = trading_functions.get_ticker(exchange_name, futures_symbol)
+                                futures_orderbook = trading_functions.get_orderbook(exchange_name, futures_symbol, 5)
+                                exchange_data['markets']['futures'] = {
+                                    'symbol': futures_symbol,
+                                    'ticker': futures_ticker,
+                                    'orderbook': futures_orderbook,
+                                    'price': futures_ticker.get('last'),
+                                    'bid': futures_ticker.get('bid'),
+                                    'ask': futures_ticker.get('ask')
+                                }
+                            except Exception as futures_error:
+                                exchange_data['markets']['futures'] = {
+                                    'symbol': futures_symbol,
+                                    'error': str(futures_error)
+                                }
+                    else:
+                        # For other exchanges, use standard symbol format
+                        ticker = trading_functions.get_ticker(exchange_name, symbol)
+                        orderbook = trading_functions.get_orderbook(exchange_name, symbol, 10)
+                        exchange_data['markets']['default'] = {
+                            'symbol': symbol,
+                            'ticker': ticker,
+                            'orderbook': orderbook,
+                            'price': ticker.get('last'),
+                            'bid': ticker.get('bid'),
+                            'ask': ticker.get('ask')
+                        }
+                    
+                    result['market_data'][exchange_name] = exchange_data
                 else:
                     result['market_data'][exchange_name] = {
                         'status': 'unavailable'
@@ -584,6 +650,84 @@ def get_blofin_balance():
             return jsonify({'error': 'Blofin exchange not available'}), 503
     except Exception as e:
         logger.error(f"Error getting Blofin balance: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
+# BingX accurate pricing endpoint
+@app.route('/api/bingx/price/<symbol>', methods=['GET'])
+def get_bingx_price(symbol):
+    """Get accurate BingX pricing using direct API (bypasses CCXT issues)"""
+    try:
+        market_type = request.args.get('market_type', 'spot').lower()
+        
+        result = {
+            'timestamp': datetime.now().isoformat(),
+            'symbol': symbol,
+            'market_type': market_type,
+            'bingx_pricing': {},
+            'api_method': 'direct' if bingx_direct_available else 'ccxt'
+        }
+        
+        # Use direct BingX API for maximum accuracy
+        if bingx_direct_available:
+            try:
+                # Get comprehensive ticker data using official BingX API
+                ticker_data = bingx_direct.get_ticker(symbol)
+                
+                result['bingx_pricing']['spot'] = {
+                    'symbol': symbol,
+                    'price': ticker_data['last'],
+                    'bid': ticker_data['bid'],
+                    'ask': ticker_data['ask'],
+                    'high_24h': ticker_data['high'],
+                    'low_24h': ticker_data['low'],
+                    'volume_24h': ticker_data['baseVolume'],
+                    'change_24h': ticker_data['change'],
+                    'change_percent_24h': ticker_data['percentage'],
+                    'market_type': 'perpetual_futures',
+                    'source': 'bingx_official_api',
+                    'accuracy': 'high'
+                }
+                
+                # Also get simplified price for verification
+                price_data = bingx_direct.get_price(symbol)
+                result['bingx_pricing']['price_verification'] = {
+                    'price_endpoint': price_data['price'],
+                    'ticker_endpoint': ticker_data['last'],
+                    'price_match': abs(price_data['price'] - ticker_data['last']) < 0.01
+                }
+                
+            except Exception as e:
+                result['bingx_pricing']['direct_api_error'] = str(e)
+                # Fallback to CCXT if direct API fails
+                if 'bingx' in exchange_manager.get_available_exchanges():
+                    try:
+                        spot_ticker = trading_functions.get_ticker('bingx', symbol)
+                        result['bingx_pricing']['ccxt_fallback'] = {
+                            'price': spot_ticker.get('last'),
+                            'source': 'ccxt_fallback'
+                        }
+                    except Exception as ccxt_error:
+                        result['bingx_pricing']['ccxt_error'] = str(ccxt_error)
+        else:
+            # CCXT fallback only
+            if 'bingx' in exchange_manager.get_available_exchanges():
+                try:
+                    spot_ticker = trading_functions.get_ticker('bingx', symbol)
+                    result['bingx_pricing']['spot'] = {
+                        'symbol': symbol,
+                        'price': spot_ticker.get('last'),
+                        'bid': spot_ticker.get('bid'),
+                        'ask': spot_ticker.get('ask'),
+                        'source': 'ccxt_only'
+                    }
+                except Exception as e:
+                    result['bingx_pricing']['ccxt_error'] = str(e)
+            else:
+                result['error'] = 'BingX exchange not available'
+            
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error getting BingX price for {symbol}: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
 
 # BingX klines endpoint from your API schema
