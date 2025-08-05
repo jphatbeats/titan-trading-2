@@ -914,13 +914,16 @@ async def run_alpha_analysis():
         market_data = get_general_crypto_news(items=25, sentiment=None, date=today)  # All sources, GPT filters
         market_intelligence = {'intelligence': market_data.get('data', [])} if market_data else None
         
-        # Add LunarCrush social sentiment data for better alpha detection
-        lunarcrush_data = await fetch_lunarcrush_data()
-        if lunarcrush_data:
-            if market_intelligence:
-                market_intelligence['lunarcrush'] = lunarcrush_data
-            else:
-                market_intelligence = {'lunarcrush': lunarcrush_data}
+        # Get real-time market data from existing Railway endpoints
+        try:
+            market_data = await fetch_railway_api("/api/live/market-data/BTC/USDT")
+            if market_data and not market_data.get('error'):
+                if market_intelligence:
+                    market_intelligence['market_data'] = market_data
+                else:
+                    market_intelligence = {'market_data': market_data}
+        except Exception as e:
+            print(f"⚠️ Market data unavailable: {e}")
         
         # Get comprehensive market data for AI analysis
         comprehensive_market_data = None
@@ -928,7 +931,7 @@ async def run_alpha_analysis():
             try:
                 # Fetch real-time market data from Railway API for accurate price analysis
                 import aiohttp
-                railway_market_data = await fetch_railway_api("/api/chatgpt/opportunity-scanner")
+                railway_market_data = await fetch_railway_api("/api/live/all-exchanges")
                 
                 scan_data = {
                     'opportunities': opportunities,
@@ -1438,17 +1441,19 @@ async def check_breaking_alerts():
     try:
         print("\n🚨 Checking for AI-enhanced breaking alerts...")
         
-        # Get high priority alerts only
-        priority_alerts = await fetch_railway_api("/api/alerts/prioritized?limit=5&urgency=HIGH")
+        # Use CryptoNews API directly for breaking alerts
+        from crypto_news_alerts import get_general_crypto_news
+        today = datetime.now().strftime('%Y-%m-%d')
+        breaking_news = get_general_crypto_news(items=5, sentiment='negative', date=today)
         
-        if not priority_alerts or not priority_alerts.get('alerts'):
+        if not breaking_news or not breaking_news.get('data'):
             print("🔍 No urgent breaking alerts found")
             return
         
-        # Filter for truly breaking news from Tier 1 sources
+        # Filter for truly breaking news from recent articles
         breaking_alerts = []
         
-        for alert in priority_alerts['alerts']:
+        for alert in breaking_news['data']:
             # Only send if it's HIGH urgency and from Tier 1 sources
             urgency = alert.get('urgency', '').upper()
             source = alert.get('source_name', alert.get('source', ''))
