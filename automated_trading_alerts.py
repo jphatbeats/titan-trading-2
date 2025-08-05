@@ -15,6 +15,7 @@ import schedule
 import threading
 import asyncio
 import aiohttp
+from aiohttp import ClientTimeout
 import requests
 import discord
 
@@ -28,6 +29,8 @@ except ImportError as e:
     print(f"❌ Crypto news API not available: {e}")
 
 # Import OpenAI trading intelligence
+trading_ai = None
+ai_opportunities = None
 try:
     from openai_trading_intelligence import TradingIntelligence
     trading_ai = TradingIntelligence()
@@ -35,9 +38,11 @@ try:
     print("✅ OpenAI Trading Intelligence loaded successfully")
 except ImportError as e:
     openai_available = False
+    trading_ai = None
     print(f"❌ OpenAI Trading Intelligence not available: {e}")
 except Exception as e:
     openai_available = False
+    trading_ai = None
     print(f"❌ OpenAI initialization error: {e}")
 
 # Discord Bot Configuration (using Discord.py instead of webhooks)
@@ -235,6 +240,7 @@ def analyze_trading_conditions(positions):
             margin_size = float(position.get('Margin Size ($)', 0))
             entry_price = float(position.get('Entry Price', 0))
             mark_price = float(position.get('Mark Price', 0))
+            leverage = float(position.get('Leverage', 1))
 
             # Skip if symbol is empty
             if not symbol:
@@ -524,14 +530,14 @@ async def fetch_dexscreener_trending():
         async with aiohttp.ClientSession() as session:
             # Get boosted tokens (trending with social momentum)
             boosted_url = "https://api.dexscreener.com/token-boosts/latest/v1"
-            async with session.get(boosted_url, timeout=10) as response:
+            async with session.get(boosted_url, timeout=ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     boosted_data = await response.json()
                     print(f"✅ DexScreener boosted tokens fetched: {len(boosted_data)} tokens")
                     
                     # Also get top boosted for maximum momentum
                     top_boosted_url = "https://api.dexscreener.com/token-boosts/top/v1"
-                    async with session.get(top_boosted_url, timeout=10) as response2:
+                    async with session.get(top_boosted_url, timeout=ClientTimeout(total=10)) as response2:
                         if response2.status == 200:
                             top_boosted_data = await response2.json()
                             print(f"✅ DexScreener top boosted fetched: {len(top_boosted_data)} tokens")
@@ -547,7 +553,7 @@ async def fetch_dexscreener_trending():
                     print(f"❌ DexScreener boosted API error: {response.status}")
                     # Fallback to token profiles for new launches
                     profiles_url = "https://api.dexscreener.com/token-profiles/latest/v1"
-                    async with session.get(profiles_url, timeout=10) as response3:
+                    async with session.get(profiles_url, timeout=ClientTimeout(total=10)) as response3:
                         if response3.status == 200:
                             profiles_data = await response3.json()
                             print(f"✅ DexScreener profiles fallback: {len(profiles_data)} new tokens")
@@ -604,11 +610,11 @@ async def send_discord_alert(message, channel='portfolio'):
             try:
                 # Get the channel and send message
                 discord_channel = client.get_channel(channel_id)
-                if discord_channel:
+                if discord_channel and hasattr(discord_channel, 'send'):
                     await discord_channel.send(message)
                     print(f"✅ Discord alert sent to #{channel} ({channel_id})")
                 else:
-                    print(f"❌ Discord channel {channel_id} not found")
+                    print(f"❌ Discord channel {channel_id} not found or not a text channel")
                 
                 # Close the connection
                 await client.close()
@@ -803,7 +809,7 @@ async def run_portfolio_analysis():
         
         # Get AI-powered portfolio analysis if available
         ai_insights = None
-        if openai_available and positions:
+        if openai_available and trading_ai and positions:
             try:
                 portfolio_data = {
                     'positions': positions,
@@ -927,6 +933,7 @@ async def run_alpha_analysis():
         
         # Get comprehensive market data for AI analysis
         comprehensive_market_data = None
+        ai_opportunities = None
         if openai_available:
             try:
                 # Fetch real-time market data from Railway API for accurate price analysis
@@ -941,7 +948,10 @@ async def run_alpha_analysis():
                     'timestamp': datetime.now().isoformat(),
                     'data_sources': ['cryptonews_api', 'exchange_tickers', 'technical_indicators']
                 }
-                ai_opportunities = trading_ai.scan_opportunities(scan_data, market_intelligence or {})
+                if trading_ai:
+                    ai_opportunities = trading_ai.scan_opportunities(scan_data, market_intelligence or {})
+                else:
+                    ai_opportunities = None
                 print("✅ AI opportunity scan with real-time market data completed")
             except Exception as ai_e:
                 print(f"⚠️ AI opportunity scan failed: {ai_e}")
@@ -954,19 +964,74 @@ async def run_alpha_analysis():
         
         # Add AI opportunity insights first if available
         if ai_opportunities and not ai_opportunities.get('error'):
-            alpha_message += f"🧠 **AI OPPORTUNITY ANALYSIS:**\n"
+            alpha_message += f"🧠 **AI OPPORTUNITY ANALYSIS:**\n\n"
             
-            # High probability setups
+            # High probability setups with organized formatting
             if 'high_probability_setups' in ai_opportunities:
-                setups = ai_opportunities['high_probability_setups'][:2]  # Top 2
-                for i, setup in enumerate(setups, 1):
-                    alpha_message += f"⭐ {i}. {setup}\n"
+                setups = ai_opportunities['high_probability_setups']
+                if isinstance(setups, list):
+                    for i, setup in enumerate(setups[:2], 1):
+                        alpha_message += f"**⭐ Setup #{i}:**\n"
+                        if isinstance(setup, dict):
+                            # Extract structured data from setup
+                            asset = setup.get('asset', setup.get('symbol', 'N/A'))
+                            entry = setup.get('entry_price', setup.get('entry', 'N/A'))
+                            target = setup.get('target_levels', setup.get('target', 'N/A'))
+                            stop = setup.get('stop_loss', setup.get('stop', 'N/A'))
+                            confidence = setup.get('confidence', setup.get('probability', 'N/A'))
+                            
+                            alpha_message += f"🎯 **Asset:** {asset}\n"
+                            alpha_message += f"📍 **Entry:** {entry}\n"
+                            alpha_message += f"🚀 **Target:** {target}\n"
+                            alpha_message += f"🛡️ **Stop Loss:** {stop}\n"
+                            alpha_message += f"📊 **Confidence:** {confidence}\n\n"
+                        else:
+                            # If it's a string, format it nicely
+                            alpha_message += f"{setup}\n\n"
+                elif isinstance(setups, str):
+                    alpha_message += f"{setups}\n\n"
+            
+            # Entry price analysis
+            if 'entry_price_analysis' in ai_opportunities:
+                entry_analysis = ai_opportunities['entry_price_analysis']
+                alpha_message += f"**📍 ENTRY ANALYSIS:**\n{entry_analysis}\n\n"
+            
+            # Target levels
+            if 'target_levels' in ai_opportunities:
+                targets = ai_opportunities['target_levels']
+                alpha_message += f"**🚀 TARGET LEVELS:**\n{targets}\n\n"
             
             # Risk/reward analysis
-            if 'risk_reward_analysis' in ai_opportunities:
-                alpha_message += f"📊 Risk/Reward: {ai_opportunities['risk_reward_analysis']}\n"
+            if 'risk_reward_ratios' in ai_opportunities:
+                risk_reward = ai_opportunities['risk_reward_ratios']
+                alpha_message += f"**📊 RISK/REWARD:**\n{risk_reward}\n\n"
             
-            alpha_message += f"\n"
+            # Technical signals
+            if 'technical_signals' in ai_opportunities:
+                tech_signals = ai_opportunities['technical_signals']
+                alpha_message += f"**📈 TECHNICAL SIGNALS:**\n{tech_signals}\n\n"
+            
+            # News catalysts
+            if 'news_catalysts' in ai_opportunities:
+                news_catalysts = ai_opportunities['news_catalysts']
+                alpha_message += f"**📰 NEWS CATALYSTS:**\n{news_catalysts}\n\n"
+            
+            # Timeline expectations
+            if 'timeline_expectations' in ai_opportunities:
+                timeline = ai_opportunities['timeline_expectations']
+                alpha_message += f"**⏰ TIMELINE:**\n{timeline}\n\n"
+            
+            # Fallback for any unstructured insights
+            if not any(key in ai_opportunities for key in ['high_probability_setups', 'entry_price_analysis', 'target_levels', 'technical_signals']):
+                # Show the raw AI analysis but formatted better
+                alpha_message += f"**🧠 AI MARKET INSIGHTS:**\n"
+                for key, value in ai_opportunities.items():
+                    if key not in ['timestamp', 'ai_powered', 'analysis_type', 'scan_id', 'error']:
+                        if isinstance(value, (str, int, float)):
+                            alpha_message += f"• **{key.replace('_', ' ').title()}:** {value}\n"
+                        elif isinstance(value, list) and value:
+                            alpha_message += f"• **{key.replace('_', ' ').title()}:** {', '.join(map(str, value[:3]))}\n"
+                alpha_message += f"\n"
         
         # Trading opportunities
         if opportunities and opportunities.get('opportunities'):
@@ -1125,7 +1190,10 @@ async def run_degen_memes_scan():
                     'timestamp': datetime.now().isoformat(),
                     'fallback_analysis': viral_plays is None and not trending_coins
                 }
-                ai_degen_analysis = trading_ai.scan_degen_opportunities(degen_scan_data)
+                if trading_ai:
+                    ai_degen_analysis = trading_ai.scan_degen_opportunities(degen_scan_data)
+                else:
+                    ai_degen_analysis = None
                 print("✅ AI degen analysis completed")
             except Exception as ai_e:
                 print(f"⚠️ AI degen analysis failed: {ai_e}")
@@ -1464,7 +1532,7 @@ async def check_breaking_alerts():
         if breaking_alerts:
             # Get AI analysis of breaking alerts if available
             ai_alert_analysis = None
-            if openai_available:
+            if openai_available and trading_ai:
                 try:
                     ai_alert_analysis = trading_ai.analyze_alerts_for_discord(breaking_alerts)
                     print("✅ AI breaking alert analysis generated")
