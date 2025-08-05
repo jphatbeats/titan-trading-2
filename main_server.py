@@ -730,6 +730,78 @@ def get_bingx_price(symbol):
         logger.error(f"Error getting BingX price for {symbol}: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
 
+# BingX candlestick data endpoint
+@app.route('/api/bingx/candlesticks/<symbol>', methods=['GET'])
+def get_bingx_candlesticks(symbol):
+    """Get BingX candlestick/OHLCV data using direct API"""
+    try:
+        # Get query parameters
+        interval = request.args.get('interval', '1h')
+        limit = int(request.args.get('limit', 500))
+        start_time = request.args.get('startTime')
+        end_time = request.args.get('endTime')
+        
+        # Convert string timestamps to integers if provided
+        start_time_int = int(start_time) if start_time else None
+        end_time_int = int(end_time) if end_time else None
+        
+        result = {
+            'timestamp': datetime.now().isoformat(),
+            'symbol': symbol,
+            'interval': interval,
+            'limit': limit,
+            'bingx_klines': {},
+            'api_method': 'direct' if bingx_direct_available else 'ccxt'
+        }
+        
+        # Use direct BingX API for candlestick data
+        if bingx_direct_available:
+            try:
+                klines_data = bingx_direct.get_klines(
+                    symbol=symbol,
+                    interval=interval,
+                    limit=limit,
+                    start_time=start_time_int,
+                    end_time=end_time_int
+                )
+                
+                result['bingx_klines'] = {
+                    'symbol': klines_data['symbol'],
+                    'timeframe': klines_data['timeframe'],
+                    'count': klines_data['count'],
+                    'ohlcv': klines_data['ohlcv'][:10],  # Show first 10 candles for preview
+                    'full_data_count': len(klines_data['ohlcv']),
+                    'source': 'bingx_official_api',
+                    'accuracy': 'high'
+                }
+                
+                # Add summary statistics
+                if klines_data['ohlcv']:
+                    latest_candle = klines_data['ohlcv'][-1]
+                    first_candle = klines_data['ohlcv'][0]
+                    
+                    result['bingx_klines']['summary'] = {
+                        'latest_close': latest_candle[4],
+                        'latest_volume': latest_candle[5],
+                        'time_range': {
+                            'start': first_candle[0],
+                            'end': latest_candle[0]
+                        },
+                        'price_change': latest_candle[4] - first_candle[1],
+                        'price_change_percent': ((latest_candle[4] - first_candle[1]) / first_candle[1]) * 100
+                    }
+                
+            except Exception as e:
+                result['bingx_klines']['direct_api_error'] = str(e)
+                # Could add CCXT fallback here if needed
+        else:
+            result['error'] = 'BingX direct API not available'
+            
+        return jsonify(result)
+    except Exception as e:
+        logger.error(f"Error getting BingX klines for {symbol}: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
+
 # BingX klines endpoint from your API schema
 @app.route('/api/bingx/klines/<symbol>', methods=['GET'])
 def get_bingx_klines(symbol):
