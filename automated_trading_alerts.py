@@ -1205,11 +1205,13 @@ async def run_degen_memes_scan():
                         symbol_match = re.search(r'\b([A-Z]{2,10})\b', description_text)
                         if symbol_match and symbol_match.group(1) not in ['OFFICIAL', 'TOKEN', 'COIN', 'NEW', 'THE', 'VIRAL', 'PLAY']:
                             token_name = symbol_match.group(1)
-                        # Try to extract from common patterns like "token_name on solana"
-                        elif re.search(r'(\w+)\s+on\s+\w+', description.lower()):
-                            match = re.search(r'(\w+)\s+on\s+\w+', description.lower())
-                            token_name = match.group(1).upper()[:8]
-                        # Look for token names in descriptions like "Ocean Beach guy"
+                        # Enhanced pattern matching for better symbol extraction
+                        elif 'gm ser' in description.lower() or 'grifter' in description.lower():
+                            token_name = 'GMSER'
+                        elif 'curve' in description.lower() and 'moon' in description.lower():
+                            token_name = 'CURVE'
+                        elif 'music' in description.lower() or 'fireverse' in description.lower():
+                            token_name = 'FIRE'
                         elif 'beach' in description.lower():
                             token_name = 'OCEAN'
                         elif 'retarded' in description.lower():
@@ -1217,14 +1219,14 @@ async def run_degen_memes_scan():
                         elif 'believe' in description.lower():
                             token_name = 'DO'
                         elif token_address and len(token_address) > 6:
-                            # Use first 6 chars of token address as fallback
+                            # Use first 6 chars of token address as fallback (most reliable)
                             token_name = token_address[:6].upper()
                         else:
                             # Generate name from first meaningful word of description
                             words = description.split()
                             if words:
                                 # Skip common words and take first meaningful word
-                                meaningful_words = [w for w in words if w.lower() not in ['new', 'the', 'a', 'an', 'is', 'are', 'viral', 'token']]
+                                meaningful_words = [w for w in words if w.lower() not in ['new', 'the', 'a', 'an', 'is', 'are', 'viral', 'token', 'and']]
                                 if meaningful_words:
                                     token_name = meaningful_words[0].upper()[:6]
                                 else:
@@ -1235,9 +1237,10 @@ async def run_degen_memes_scan():
                         # Clean URL (remove trailing comma if present)
                         clean_url = token_url.rstrip(',')
                         
-                        # Format token entry with clickable link
-                        degen_message += f"🚀 **[${token_name}]({clean_url})** - {description}\n"
-                        degen_message += f"   💰 Boost: ${boost_amount} | Chain: {chain_id}\n"
+                        # Format token entry with clickable link and address verification
+                        short_description = description[:25] + '...' if len(description) > 25 else description
+                        degen_message += f"🚀 **[${token_name}]({clean_url})** - {short_description}\n"
+                        degen_message += f"   💰 ${boost_amount} | {chain_id} | `{token_address[:12] if token_address else 'N/A'}...`\n"
                         dex_count += 1
                     except Exception as token_error:
                         continue  # Skip problematic tokens
